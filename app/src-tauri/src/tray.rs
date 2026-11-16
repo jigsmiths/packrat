@@ -34,7 +34,7 @@ pub fn refresh(app: &AppHandle) {
         return;
     };
     let state = app.state::<AppState>();
-    let has_problem = state.problem().is_some() || state.hotkey_problem().is_some();
+    let has_problem = state.problem().is_some() || state.settings_problem().is_some();
     let tooltip = if has_problem {
         "Packrat: needs attention"
     } else if state.paused.load(Ordering::Relaxed) {
@@ -67,8 +67,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?)?;
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
-    if let Some(problem) = state.hotkey_problem().as_deref() {
-        let label = format!("Hotkey unavailable: {problem}");
+    if let Some(problem) = state.settings_problem().as_deref() {
+        let label = format!("Settings problem: {problem}");
         menu.append(&MenuItem::new(app, label, false, None::<&str>)?)?;
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }

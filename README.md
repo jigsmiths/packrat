@@ -14,12 +14,23 @@ Working today:
 - Skips secrets copied from password managers
 - History encrypted at rest, with the key in the macOS Keychain
 - Popup on Cmd+Shift+V that copies the chosen clip back to the clipboard
+- Settings that apply as soon as you save them
 
 Still to come:
 
 - Pasting straight into the app you were using
-- Settings for the hotkey and the expiry time
 - Signed releases and launch at login
+
+## Settings
+
+Packrat writes a commented `config.toml` on first run, at `~/Library/Application Support/com.jigsmiths.packrat/config.toml`:
+
+```toml
+ttl = "24h"             # how long unpinned clips are kept, "0" keeps them forever
+hotkey = "Cmd+Shift+V"  # the global hotkey that opens Packrat
+```
+
+Edits take effect within a second. If a value is invalid, Packrat keeps the previous settings and shows the reason in its menu bar menu.
 
 ## Requirements
 

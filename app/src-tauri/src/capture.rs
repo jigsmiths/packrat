@@ -8,7 +8,7 @@ use packrat_core::collector::Collector;
 use packrat_core::pasteboard::SystemPasteboard;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::AppState;
+use crate::{config, AppState};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -21,12 +21,13 @@ pub fn now_ms() -> i64 {
         .map_or(0, |elapsed| elapsed.as_millis() as i64)
 }
 
-pub fn spawn(app: AppHandle) {
+pub fn spawn(app: AppHandle, mut config: config::Watcher) {
     thread::spawn(move || {
         let pasteboard = SystemPasteboard;
         let mut collector = Collector::new(&pasteboard);
         loop {
             thread::sleep(POLL_INTERVAL);
+            config.poll(&app);
             let state = app.state::<AppState>();
             collector.set_paused(state.paused.load(Ordering::Relaxed));
 
