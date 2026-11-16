@@ -1,0 +1,19 @@
+[package]
+name = "packrat"
+description = "Clipboard history in the macOS menu bar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+packrat-core = { path = "../../crates/packrat-core" }
+tauri = { version = "2", features = ["tray-icon"] }
+
+[features]
+# Embeds the frontend in the binary. Release builds made without the Tauri CLI need it.
+custom-protocol = ["tauri/custom-protocol"]
