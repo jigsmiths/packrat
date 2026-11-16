@@ -6,6 +6,7 @@ use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Wry};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::{popup, storage, AppState};
@@ -13,6 +14,7 @@ use crate::{popup, storage, AppState};
 const TRAY_ID: &str = "main";
 const OPEN: &str = "open";
 const PAUSE: &str = "pause";
+const LAUNCH_AT_LOGIN: &str = "launch-at-login";
 const RESET: &str = "reset";
 const QUIT: &str = "quit";
 
@@ -89,8 +91,41 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         paused,
         None::<&str>,
     )?)?;
+    if offers_launch_at_login(app) {
+        let enabled = app.autolaunch().is_enabled().unwrap_or(false);
+        menu.append(&CheckMenuItem::with_id(
+            app,
+            LAUNCH_AT_LOGIN,
+            "Launch at login",
+            true,
+            enabled,
+            None::<&str>,
+        )?)?;
+    }
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?)?;
     Ok(menu)
+}
+
+/// Dev builds stay out of the login items, so they never start beside the real app.
+fn offers_launch_at_login(app: &AppHandle) -> bool {
+    !app.config().identifier.ends_with(".dev")
+}
+
+fn toggle_launch_at_login(app: &AppHandle) {
+    let launcher = app.autolaunch();
+    let enable = !launcher.is_enabled().unwrap_or(false);
+    let result = if enable {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    };
+    match result {
+        Ok(()) => log::info!("launch at login={enable}"),
+        Err(err) => log::error!("could not change launch at login: {err}"),
+    }
+    // Rebuild so the checkbox shows what macOS now has, even after a failure.
+    refresh(app);
 }
 
 fn on_menu_event(app: &AppHandle, event: MenuEvent) {
@@ -104,6 +139,7 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
             log::info!("capture paused={paused}");
             refresh(app);
         }
+        LAUNCH_AT_LOGIN => toggle_launch_at_login(app),
         RESET => confirm_reset(app),
         QUIT => app.exit(0),
         _ => {}

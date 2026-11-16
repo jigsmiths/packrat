@@ -15,10 +15,11 @@ Working today:
 - History encrypted at rest, with the key in the macOS Keychain
 - Popup on Cmd+Shift+V that pastes the chosen clip into the app you were using
 - Settings that apply as soon as you save them
+- "Launch at login" in the menu bar menu
 
 Still to come:
 
-- Signed releases and launch at login
+- Signed releases
 
 ## Pasting
 
