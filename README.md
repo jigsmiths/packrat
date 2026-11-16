@@ -20,14 +20,18 @@ Planned for the first release:
 - macOS
 - Rust (stable), via [rustup](https://rustup.rs)
 - [just](https://github.com/casey/just)
+- Tauri CLI: `cargo install tauri-cli --version "^2" --locked`
 
 ## Development
 
 ```bash
-just run     # run the app from source
-just check   # format check, clippy and tests, same as CI
-just build   # release binary at target/release/packrat
+just run       # run from source as "Packrat Dev"
+just check     # format check, clippy and tests, same as CI
+just build     # build target/release/bundle/macos/Packrat.app
+just install   # build and copy Packrat.app into /Applications
 ```
+
+`just run` uses its own bundle identifier (`com.jigsmiths.packrat.dev`), so a dev build never shares data or permissions with an installed Packrat.
 
 ## Layout
 

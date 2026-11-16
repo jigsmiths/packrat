@@ -1,13 +1,20 @@
 default:
     @just --list
 
-# Build the release binary with the frontend embedded
-build:
-    cargo build --release -p packrat --features custom-protocol
+app_bundle := "target/release/bundle/macos/Packrat.app"
 
-# Run the app from source
+# Build Packrat.app
+build:
+    cd app && cargo tauri build
+
+# Run from source as "Packrat Dev", which keeps its own data and permissions
 run:
-    cargo run -p packrat --features custom-protocol
+    cd app && cargo tauri dev --config src-tauri/tauri.dev.conf.json
+
+# Build and copy Packrat.app into /Applications
+install: build
+    rm -rf /Applications/Packrat.app
+    cp -R {{app_bundle}} /Applications/
 
 test:
     cargo test --workspace
