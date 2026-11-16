@@ -21,6 +21,7 @@ test:
 
 lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo clippy -p packrat-core --all-targets -- -D warnings
 
 fmt:
     cargo fmt --all
