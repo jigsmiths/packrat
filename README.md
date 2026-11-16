@@ -13,13 +13,16 @@ Working today:
 - Text clipboard history with pinning, fuzzy search and expiry of unpinned clips
 - Skips secrets copied from password managers
 - History encrypted at rest, with the key in the macOS Keychain
-- Popup on Cmd+Shift+V that copies the chosen clip back to the clipboard
+- Popup on Cmd+Shift+V that pastes the chosen clip into the app you were using
 - Settings that apply as soon as you save them
 
 Still to come:
 
-- Pasting straight into the app you were using
 - Signed releases and launch at login
+
+## Pasting
+
+Enter pastes the selected clip by sending Cmd+V to the app you came from. macOS only allows that once you add Packrat under System Settings > Privacy & Security > Accessibility. Until then Enter copies the clip instead, and the popup shows an "Allow pasting…" link that opens the right pane. Cmd+Enter always copies without pasting.
 
 ## Settings
 

@@ -12,8 +12,11 @@ const preview = document.getElementById("preview");
 const meta = document.getElementById("meta");
 const hint = document.getElementById("hint");
 const count = document.getElementById("count");
+const permission = document.getElementById("permission");
 
-const KEYS_HINT = "Enter copy • ⌘P pin • ⌘⌫ delete • Esc close";
+const OTHER_KEYS = "⌘P pin • ⌘⌫ delete • Esc close";
+const PASTE_HINT = `Enter paste • ⌘↩ copy • ${OTHER_KEYS}`;
+const COPY_HINT = `Enter copy • ${OTHER_KEYS}`;
 const CONFIRM_HINT = "Delete this pinned clip? ⌘⌫ again to confirm, Esc to cancel";
 
 // The last answer from list_clips, or null when it failed.
@@ -22,6 +25,8 @@ let failure = null;
 let selectedHash = null;
 // Hash of a pinned clip waiting for a second Cmd+Backspace.
 let pendingDelete = null;
+// Whether macOS lets Packrat send the paste keystroke. Asked each time the popup opens.
+let canPaste = false;
 let listRequest = 0;
 let previewRequest = 0;
 
@@ -89,7 +94,12 @@ function markSelection() {
 
 function renderStatus() {
   hint.classList.toggle("warn", pendingDelete !== null);
-  hint.textContent = pendingDelete !== null ? CONFIRM_HINT : KEYS_HINT;
+  if (pendingDelete !== null) {
+    hint.textContent = CONFIRM_HINT;
+  } else {
+    hint.textContent = canPaste ? PASTE_HINT : COPY_HINT;
+  }
+  permission.hidden = canPaste || pendingDelete !== null;
 
   if (!listing) {
     count.textContent = "";
@@ -142,15 +152,35 @@ function move(step) {
   select(all[next].hash);
 }
 
-async function run(command) {
+async function togglePin() {
   const row = selectedRow();
   if (!row) return;
   try {
-    await invoke(command, { hash: row.hash });
+    await invoke("toggle_pin", { hash: row.hash });
   } catch (err) {
-    console.error(command, err);
+    console.error("toggle_pin", err);
   }
   await refresh();
+}
+
+async function copySelected(paste) {
+  const row = selectedRow();
+  if (!row) return;
+  try {
+    await invoke("copy_clip", { hash: row.hash, paste });
+  } catch (err) {
+    console.error("copy_clip", err);
+    await refresh();
+  }
+}
+
+async function checkPermission() {
+  try {
+    canPaste = await invoke("paste_allowed");
+  } catch (err) {
+    canPaste = false;
+  }
+  renderStatus();
 }
 
 async function deleteSelected() {
@@ -198,10 +228,10 @@ window.addEventListener("keydown", (event) => {
   } else if (event.key === "ArrowUp" || (control && event.key === "p")) {
     move(-1);
   } else if (event.key === "Enter") {
-    // Cmd+Enter will mean "copy without pasting" once pasting exists.
-    run("copy_clip");
+    // Cmd+Enter copies without pasting.
+    copySelected(!event.metaKey);
   } else if (command && event.key === "p") {
-    run("toggle_pin");
+    togglePin();
   } else if (command && event.key === "Backspace") {
     deleteSelected();
   } else {
@@ -222,7 +252,11 @@ list.addEventListener("click", (event) => {
 });
 
 list.addEventListener("dblclick", (event) => {
-  if (event.target.closest("li[data-hash]")) run("copy_clip");
+  if (event.target.closest("li[data-hash]")) copySelected(true);
+});
+
+permission.addEventListener("click", () => {
+  invoke("open_accessibility_settings");
 });
 
 listen("popup-shown", () => {
@@ -230,9 +264,11 @@ listen("popup-shown", () => {
   selectedHash = null;
   pendingDelete = null;
   filter.focus();
+  checkPermission();
   refresh();
 });
 
 listen("history-changed", refresh);
 
+checkPermission();
 refresh();
