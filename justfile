@@ -16,6 +16,12 @@ install: build
     rm -rf /Applications/Packrat.app
     cp -R {{app_bundle}} /Applications/
 
+# Build Packrat.app as the given version and zip it into dist/, as the release workflow does
+package version:
+    cd app && cargo tauri build --config '{"version":"{{version}}"}'
+    mkdir -p dist
+    ditto -c -k --keepParent {{app_bundle}} dist/Packrat-{{version}}.zip
+
 test:
     cargo test --workspace
 
