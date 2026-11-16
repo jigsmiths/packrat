@@ -1,6 +1,8 @@
 mod capture;
 mod commands;
 mod config;
+mod focus;
+mod paste;
 mod popup;
 mod storage;
 mod tray;
@@ -122,13 +124,16 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if window.label() == popup::LABEL && matches!(event, WindowEvent::Focused(false)) {
-                popup::hide(window.app_handle());
+                // The user moved focus themselves, so leave it where they put it.
+                popup::hide(window.app_handle(), false);
             }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_clips,
             commands::preview_clip,
             commands::copy_clip,
+            commands::paste_allowed,
+            commands::open_accessibility_settings,
             commands::toggle_pin,
             commands::delete_clip,
             commands::hide_popup,

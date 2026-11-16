@@ -3,6 +3,8 @@
 use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
+use crate::focus;
+
 pub const LABEL: &str = "main";
 
 /// Emitted to the frontend each time the popup appears.
@@ -26,6 +28,7 @@ pub fn show(app: &AppHandle) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
     };
+    focus::remember();
     let result = place_on_cursor_screen(&window)
         .and_then(|()| window.show())
         .and_then(|()| window.set_focus())
@@ -35,10 +38,19 @@ pub fn show(app: &AppHandle) {
     }
 }
 
-pub fn hide(app: &AppHandle) {
+/// Hides the popup. `restore_focus` returns the user to the app they came
+/// from, and should be false when they moved focus somewhere themselves.
+pub fn hide(app: &AppHandle, restore_focus: bool) {
+    // Taken first: hiding fires a blur event, which lands back here.
+    let previous = focus::take();
     if let Some(window) = app.get_webview_window(LABEL) {
         if let Err(err) = window.hide() {
             log::error!("could not hide the popup: {err}");
+        }
+    }
+    if let Some(pid) = previous.filter(|_| restore_focus) {
+        if !focus::activate(pid) {
+            log::warn!("could not return focus to the previous app");
         }
     }
 }
@@ -49,7 +61,7 @@ pub fn toggle(app: &AppHandle) {
         .and_then(|window| window.is_visible().ok())
         .unwrap_or(false);
     if visible {
-        hide(app);
+        hide(app, true);
     } else {
         show(app);
     }

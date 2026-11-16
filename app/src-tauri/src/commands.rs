@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::capture::now_ms;
-use crate::{popup, AppState};
+use crate::{paste, popup, AppState};
 
 const MAX_ROWS: usize = 500;
 const SUMMARY_CHARS: usize = 200;
@@ -116,8 +116,15 @@ pub fn preview_clip(state: State<AppState>, hash: String) -> Result<Preview, Str
 }
 
 /// Puts the clip on the pasteboard, moves it to the top and hides the popup.
+/// With `paste` it then pastes into the app the user came from. Returns
+/// whether it pasted, which needs the Accessibility permission.
 #[tauri::command]
-pub fn copy_clip(app: AppHandle, state: State<AppState>, hash: String) -> Result<(), String> {
+pub fn copy_clip(
+    app: AppHandle,
+    state: State<AppState>,
+    hash: String,
+    paste: bool,
+) -> Result<bool, String> {
     let content = with_history(&state, |history| {
         let content = history
             .clips()
@@ -131,9 +138,23 @@ pub fn copy_clip(app: AppHandle, state: State<AppState>, hash: String) -> Result
     if !SystemPasteboard.write_text(&content) {
         return Err("could not write to the clipboard".to_owned());
     }
-    log::info!("clip copied: {}", short(&hash));
-    popup::hide(&app);
-    Ok(())
+    popup::hide(&app, true);
+    let pasted = paste && paste::allowed();
+    if pasted {
+        paste::send_after_delay();
+    }
+    log::info!("clip copied: {} pasted={pasted}", short(&hash));
+    Ok(pasted)
+}
+
+#[tauri::command]
+pub fn paste_allowed() -> bool {
+    paste::allowed()
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() {
+    paste::open_accessibility_settings();
 }
 
 #[tauri::command]
@@ -157,7 +178,7 @@ fn short(hash: &str) -> &str {
 
 #[tauri::command]
 pub fn hide_popup(app: AppHandle) {
-    popup::hide(&app);
+    popup::hide(&app, true);
 }
 
 #[cfg(test)]
