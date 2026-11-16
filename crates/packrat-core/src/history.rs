@@ -1,0 +1,389 @@
+//! The clip list held in memory, kept in step with the database.
+
+use std::cmp::Reverse;
+use std::fmt::Write as _;
+use std::time::Duration;
+
+use sha2::{Digest, Sha256};
+
+use crate::db::{Clip, Db};
+use crate::{Error, Result};
+
+/// How long unpinned clips are kept unless configured otherwise.
+pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// What `History::add` did with the content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Added {
+    New,
+    /// The content was already known, so its clip moved to the top.
+    Bumped,
+}
+
+pub struct History {
+    db: Db,
+    clips: Vec<Clip>,
+    ttl: Option<Duration>,
+}
+
+impl History {
+    /// Loads every clip from `db`.
+    pub fn open(db: Db) -> Result<Self> {
+        let mut history = Self {
+            clips: db.load_all()?,
+            db,
+            ttl: Some(DEFAULT_TTL),
+        };
+        history.sort();
+        Ok(history)
+    }
+
+    /// Clips in display order: pinned first, then newest first.
+    pub fn clips(&self) -> &[Clip] {
+        &self.clips
+    }
+
+    /// `None` disables expiry.
+    pub fn set_ttl(&mut self, ttl: Option<Duration>) {
+        self.ttl = ttl;
+    }
+
+    /// Stores `content`, or bumps the existing clip when it is already known.
+    pub fn add(&mut self, content: &str, now_ms: i64) -> Result<Added> {
+        let hash = hash_content(content);
+        if self.position(&hash).is_some() {
+            self.touch(&hash, now_ms)?;
+            return Ok(Added::Bumped);
+        }
+        let clip = Clip {
+            hash,
+            content: content.to_owned(),
+            created_at: now_ms,
+            pinned: false,
+        };
+        self.db.insert(&clip)?;
+        self.clips.push(clip);
+        self.sort();
+        Ok(Added::New)
+    }
+
+    /// Moves a clip to the top of its group and restarts its TTL.
+    pub fn touch(&mut self, hash: &str, now_ms: i64) -> Result<()> {
+        let index = self.position(hash).ok_or(Error::NotFound)?;
+        let result = self.db.set_created_at(hash, now_ms);
+        self.drop_if_missing(index, result)?;
+        self.clips[index].created_at = now_ms;
+        self.sort();
+        Ok(())
+    }
+
+    /// Flips the pinned state and returns the new value.
+    pub fn toggle_pin(&mut self, hash: &str) -> Result<bool> {
+        let index = self.position(hash).ok_or(Error::NotFound)?;
+        let pinned = !self.clips[index].pinned;
+        let result = self.db.set_pinned(hash, pinned);
+        self.drop_if_missing(index, result)?;
+        self.clips[index].pinned = pinned;
+        self.sort();
+        Ok(pinned)
+    }
+
+    pub fn delete(&mut self, hash: &str) -> Result<()> {
+        let index = self.position(hash).ok_or(Error::NotFound)?;
+        match self.db.delete(hash) {
+            // Already gone from the database, which is the outcome we wanted.
+            Ok(()) | Err(Error::NotFound) => {}
+            Err(err) => return Err(err),
+        }
+        self.clips.remove(index);
+        Ok(())
+    }
+
+    /// Removes unpinned clips older than the TTL and returns how many went.
+    pub fn prune_expired(&mut self, now_ms: i64) -> Result<usize> {
+        let Some(ttl) = self.ttl else {
+            return Ok(0);
+        };
+        let cutoff = now_ms.saturating_sub(i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX));
+        self.db.delete_expired(cutoff)?;
+        let before = self.clips.len();
+        self.clips
+            .retain(|clip| clip.pinned || clip.created_at >= cutoff);
+        Ok(before - self.clips.len())
+    }
+
+    fn position(&self, hash: &str) -> Option<usize> {
+        self.clips.iter().position(|clip| clip.hash == hash)
+    }
+
+    fn sort(&mut self) {
+        self.clips
+            .sort_by_key(|clip| (!clip.pinned, Reverse(clip.created_at)));
+    }
+
+    /// A clip that is in memory but not in the database is stale, so forget it.
+    fn drop_if_missing(&mut self, index: usize, result: Result<()>) -> Result<()> {
+        if matches!(result, Err(Error::NotFound)) {
+            self.clips.remove(index);
+        }
+        result
+    }
+}
+
+/// Lowercase hex SHA-256 of `content`, the identity of a clip.
+pub fn hash_content(content: &str) -> String {
+    let digest = Sha256::digest(content.as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest.iter() {
+        write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
+}
+
+/// Parses a TTL setting such as `24h` or `90m`. Empty means the default and
+/// `0` disables expiry.
+pub fn parse_ttl(value: &str) -> Result<Option<Duration>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(Some(DEFAULT_TTL));
+    }
+    if value == "0" {
+        return Ok(None);
+    }
+    let ttl = humantime::parse_duration(value).map_err(|err| Error::InvalidTtl {
+        value: value.to_owned(),
+        reason: err.to_string(),
+    })?;
+    Ok((!ttl.is_zero()).then_some(ttl))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::db::Key;
+
+    const KEY: Key = [7; 32];
+    const HOUR: i64 = 60 * 60 * 1000;
+
+    fn open(path: &Path) -> History {
+        History::open(Db::open(path, &KEY).unwrap()).unwrap()
+    }
+
+    fn open_temp() -> (TempDir, PathBuf, History) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("packrat.db");
+        let history = open(&path);
+        (dir, path, history)
+    }
+
+    fn contents(history: &History) -> Vec<&str> {
+        history.clips().iter().map(|c| c.content.as_str()).collect()
+    }
+
+    #[test]
+    fn hash_matches_sha256_hex() {
+        // Same value the Go app stored, so imported hashes stay valid.
+        assert_eq!(
+            hash_content("hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn new_history_is_empty() {
+        let (_dir, _path, history) = open_temp();
+        assert!(history.clips().is_empty());
+    }
+
+    #[test]
+    fn add_stores_a_new_clip() {
+        let (_dir, _path, mut history) = open_temp();
+        assert_eq!(history.add("one", 100).unwrap(), Added::New);
+        let clip = &history.clips()[0];
+        assert_eq!(clip.content, "one");
+        assert_eq!(clip.hash, hash_content("one"));
+        assert_eq!(clip.created_at, 100);
+        assert!(!clip.pinned);
+    }
+
+    #[test]
+    fn newest_clip_comes_first() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("old", 100).unwrap();
+        history.add("new", 200).unwrap();
+        assert_eq!(contents(&history), ["new", "old"]);
+    }
+
+    #[test]
+    fn adding_known_content_bumps_it() {
+        let (_dir, path, mut history) = open_temp();
+        history.add("one", 100).unwrap();
+        history.add("two", 200).unwrap();
+        assert_eq!(history.add("one", 300).unwrap(), Added::Bumped);
+        assert_eq!(contents(&history), ["one", "two"]);
+        assert_eq!(history.clips()[0].created_at, 300);
+
+        drop(history);
+        assert_eq!(contents(&open(&path)), ["one", "two"]);
+    }
+
+    #[test]
+    fn reopening_restores_clips_and_order() {
+        let (_dir, path, mut history) = open_temp();
+        history.add("one", 100).unwrap();
+        history.add("two", 200).unwrap();
+        history.add("three", 300).unwrap();
+        history.toggle_pin(&hash_content("one")).unwrap();
+        drop(history);
+
+        let reopened = open(&path);
+        assert_eq!(contents(&reopened), ["one", "three", "two"]);
+        assert!(reopened.clips()[0].pinned);
+    }
+
+    #[test]
+    fn pinned_clips_sort_before_newer_unpinned_ones() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("old", 100).unwrap();
+        history.add("new", 200).unwrap();
+        assert!(history.toggle_pin(&hash_content("old")).unwrap());
+        assert_eq!(contents(&history), ["old", "new"]);
+
+        assert!(!history.toggle_pin(&hash_content("old")).unwrap());
+        assert_eq!(contents(&history), ["new", "old"]);
+    }
+
+    #[test]
+    fn touch_moves_a_clip_to_the_top() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("one", 100).unwrap();
+        history.add("two", 200).unwrap();
+        history.touch(&hash_content("one"), 300).unwrap();
+        assert_eq!(contents(&history), ["one", "two"]);
+    }
+
+    #[test]
+    fn delete_removes_the_clip_everywhere() {
+        let (_dir, path, mut history) = open_temp();
+        history.add("one", 100).unwrap();
+        history.add("two", 200).unwrap();
+        history.delete(&hash_content("one")).unwrap();
+        assert_eq!(contents(&history), ["two"]);
+
+        drop(history);
+        assert_eq!(contents(&open(&path)), ["two"]);
+    }
+
+    #[test]
+    fn deleted_content_can_be_added_again() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("one", 100).unwrap();
+        history.delete(&hash_content("one")).unwrap();
+        assert_eq!(history.add("one", 200).unwrap(), Added::New);
+    }
+
+    #[test]
+    fn unknown_hash_is_not_found() {
+        let (_dir, _path, mut history) = open_temp();
+        assert!(matches!(history.delete("nope"), Err(Error::NotFound)));
+        assert!(matches!(history.toggle_pin("nope"), Err(Error::NotFound)));
+        assert!(matches!(history.touch("nope", 1), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn clip_missing_from_the_database_is_dropped() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("pin me", 100).unwrap();
+        history.add("touch me", 200).unwrap();
+        history.add("delete me", 300).unwrap();
+        for content in ["pin me", "touch me", "delete me"] {
+            history.db.delete(&hash_content(content)).unwrap();
+        }
+
+        let pin = history.toggle_pin(&hash_content("pin me"));
+        assert!(matches!(pin, Err(Error::NotFound)));
+        let touch = history.touch(&hash_content("touch me"), 400);
+        assert!(matches!(touch, Err(Error::NotFound)));
+        history.delete(&hash_content("delete me")).unwrap();
+        assert!(history.clips().is_empty());
+    }
+
+    #[test]
+    fn prune_removes_old_unpinned_clips() {
+        let (_dir, path, mut history) = open_temp();
+        history.add("old", 0).unwrap();
+        history.add("old but pinned", 0).unwrap();
+        history.toggle_pin(&hash_content("old but pinned")).unwrap();
+        history.add("recent", 24 * HOUR).unwrap();
+
+        assert_eq!(history.prune_expired(25 * HOUR).unwrap(), 1);
+        assert_eq!(contents(&history), ["old but pinned", "recent"]);
+
+        drop(history);
+        assert_eq!(contents(&open(&path)), ["old but pinned", "recent"]);
+    }
+
+    #[test]
+    fn prune_keeps_a_clip_exactly_at_the_ttl() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("edge", 0).unwrap();
+        assert_eq!(history.prune_expired(24 * HOUR).unwrap(), 0);
+        assert_eq!(history.prune_expired(24 * HOUR + 1).unwrap(), 1);
+    }
+
+    #[test]
+    fn bumping_a_clip_restarts_its_ttl() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add("reused", 0).unwrap();
+        history.add("reused", 20 * HOUR).unwrap();
+        assert_eq!(history.prune_expired(30 * HOUR).unwrap(), 0);
+    }
+
+    #[test]
+    fn prune_does_nothing_when_expiry_is_off() {
+        let (_dir, _path, mut history) = open_temp();
+        history.set_ttl(None);
+        history.add("ancient", 0).unwrap();
+        assert_eq!(history.prune_expired(1000 * HOUR).unwrap(), 0);
+        assert_eq!(contents(&history), ["ancient"]);
+    }
+
+    #[test]
+    fn prune_uses_a_custom_ttl() {
+        let (_dir, _path, mut history) = open_temp();
+        history.set_ttl(Some(Duration::from_secs(60)));
+        history.add("short lived", 0).unwrap();
+        assert_eq!(history.prune_expired(61_000).unwrap(), 1);
+    }
+
+    #[test]
+    fn parse_ttl_accepts_durations() {
+        assert_eq!(parse_ttl("").unwrap(), Some(DEFAULT_TTL));
+        assert_eq!(parse_ttl("  ").unwrap(), Some(DEFAULT_TTL));
+        assert_eq!(parse_ttl("24h").unwrap(), Some(DEFAULT_TTL));
+        assert_eq!(
+            parse_ttl("90m").unwrap(),
+            Some(Duration::from_secs(90 * 60))
+        );
+        assert_eq!(
+            parse_ttl("1h30m").unwrap(),
+            Some(Duration::from_secs(90 * 60))
+        );
+        assert_eq!(parse_ttl("0").unwrap(), None);
+        assert_eq!(parse_ttl("0s").unwrap(), None);
+    }
+
+    #[test]
+    fn parse_ttl_rejects_bad_values() {
+        for value in ["abc", "-1h", "10", "h"] {
+            assert!(
+                matches!(parse_ttl(value), Err(Error::InvalidTtl { .. })),
+                "{value:?} should be rejected"
+            );
+        }
+    }
+}
