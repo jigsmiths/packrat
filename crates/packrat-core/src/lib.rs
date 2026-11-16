@@ -3,6 +3,7 @@
 pub mod db;
 pub mod history;
 pub mod keychain;
+pub mod search;
 
 /// Errors returned by this crate.
 #[derive(Debug, thiserror::Error)]
