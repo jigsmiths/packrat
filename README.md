@@ -6,14 +6,20 @@ Packrat is the successor to [clippy](https://github.com/bvdwalt/clippy), a termi
 
 ## Status
 
-Early development. The app starts and shows a tray icon, and nothing else works yet.
+Early development, not ready for daily use.
 
-Planned for the first release:
+Working today:
 
 - Text clipboard history with pinning, fuzzy search and expiry of unpinned clips
 - Skips secrets copied from password managers
 - History encrypted at rest, with the key in the macOS Keychain
-- Global hotkey popup that pastes into the app you were using
+- Popup on Cmd+Shift+V that copies the chosen clip back to the clipboard
+
+Still to come:
+
+- Pasting straight into the app you were using
+- Settings for the hotkey and the expiry time
+- Signed releases and launch at login
 
 ## Requirements
 

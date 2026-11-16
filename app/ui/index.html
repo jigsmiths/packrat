@@ -3,11 +3,21 @@
 <head>
 <meta charset="utf-8">
 <title>Packrat</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; padding: 12px; font: 14px -apple-system, sans-serif; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
+<input id="filter" type="text" placeholder="Filter clips" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Filter clips">
+<main>
+  <ul id="list" role="listbox" aria-label="Clips"></ul>
+  <section id="detail" aria-label="Preview">
+    <pre id="preview"></pre>
+    <p id="meta"></p>
+  </section>
+</main>
+<footer>
+  <span id="hint"></span>
+  <span id="count"></span>
+</footer>
+<script src="main.js"></script>
 </body>
 </html>
