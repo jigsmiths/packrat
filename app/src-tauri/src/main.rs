@@ -1,5 +1,6 @@
 mod capture;
 mod commands;
+mod config;
 mod popup;
 mod storage;
 mod tray;
@@ -7,9 +8,10 @@ mod tray;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use config::Settings;
 use packrat_core::history::History;
 use tauri::{ActivationPolicy, Manager, WindowEvent};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_log::{Target, TargetKind};
 
 /// Shared between the capture thread, the tray and the popup.
@@ -19,8 +21,10 @@ pub struct AppState {
     history: Mutex<Option<History>>,
     /// Why the history cannot be opened, shown in the tray menu.
     problem: Mutex<Option<String>>,
-    /// Why the global hotkey could not be registered, shown in the tray menu.
-    hotkey_problem: Mutex<Option<String>>,
+    /// What is wrong with the config file or the hotkey, shown in the tray menu.
+    settings_problem: Mutex<Option<String>>,
+    /// The settings in effect, `None` until the config is first read.
+    settings: Mutex<Option<Settings>>,
     pub paused: AtomicBool,
 }
 
@@ -33,17 +37,32 @@ impl AppState {
         self.problem.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub fn hotkey_problem(&self) -> MutexGuard<'_, Option<String>> {
-        self.hotkey_problem
+    pub fn settings_problem(&self) -> MutexGuard<'_, Option<String>> {
+        self.settings_problem
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    pub fn settings(&self) -> Option<Settings> {
+        *self.settings.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn set_settings(&self, settings: Settings) {
+        *self.settings.lock().unwrap_or_else(PoisonError::into_inner) = Some(settings);
+        if let Some(history) = self.history().as_mut() {
+            history.set_ttl(settings.ttl);
+        }
+    }
+
     pub fn set_history(&self, opened: Result<History, String>) {
-        let (history, problem) = match opened {
+        let (mut history, problem) = match opened {
             Ok(history) => (Some(history), None),
             Err(problem) => (None, Some(problem)),
         };
+        // A history opened after the config was read still needs its TTL.
+        if let (Some(history), Some(settings)) = (history.as_mut(), self.settings()) {
+            history.set_ttl(settings.ttl);
+        }
         *self.history() = history;
         *self.problem() = problem;
     }
@@ -90,17 +109,15 @@ fn main() {
             }
             state.set_history(opened);
 
-            let hotkey = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);
-            if let Err(err) = handle.global_shortcut().register(hotkey) {
-                log::error!("hotkey not registered: {err}");
-                *state.hotkey_problem() = Some(format!("Cmd+Shift+V ({err})"));
-            }
-
             if let Some(window) = handle.get_webview_window(popup::LABEL) {
                 popup::prepare(&window)?;
             }
             tray::create(handle)?;
-            capture::spawn(handle.clone());
+
+            // Read once here so the hotkey works before the first poll.
+            let mut config = config::Watcher::new(handle)?;
+            config.poll(handle);
+            capture::spawn(handle.clone(), config);
             Ok(())
         })
         .on_window_event(|window, event| {
