@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use crate::db::{Clip, Db};
+use crate::db::{Clip, Db, Kind};
+use crate::pasteboard::Image;
 use crate::{Error, Result};
 
 /// How long unpinned clips are kept unless configured otherwise.
@@ -60,11 +61,37 @@ impl History {
             content: content.to_owned(),
             created_at: now_ms,
             pinned: false,
+            kind: Kind::Text,
         };
         self.db.insert(&clip)?;
         self.clips.push(clip);
         self.sort();
         Ok(Added::New)
+    }
+
+    /// Stores `image`, or bumps the existing clip when the same image is known.
+    pub fn add_image(&mut self, image: &Image, now_ms: i64) -> Result<Added> {
+        let hash = hash_bytes(&image.png);
+        if self.position(&hash).is_some() {
+            self.touch(&hash, now_ms)?;
+            return Ok(Added::Bumped);
+        }
+        let clip = Clip {
+            hash,
+            content: image_label(image),
+            created_at: now_ms,
+            pinned: false,
+            kind: Kind::Image,
+        };
+        self.db.insert_image(&clip, &image.png)?;
+        self.clips.push(clip);
+        self.sort();
+        Ok(Added::New)
+    }
+
+    /// The PNG bytes of an image clip, read from disk.
+    pub fn image_data(&self, hash: &str) -> Result<Vec<u8>> {
+        self.db.load_data(hash)
     }
 
     /// Moves a clip to the top of its group and restarts its TTL.
@@ -132,12 +159,26 @@ impl History {
 
 /// Lowercase hex SHA-256 of `content`, the identity of a clip.
 pub fn hash_content(content: &str) -> String {
-    let digest = Sha256::digest(content.as_bytes());
+    hash_bytes(content.as_bytes())
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+pub fn hash_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest.iter() {
         write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
     }
     hex
+}
+
+/// The text shown and searched for an image clip.
+fn image_label(image: &Image) -> String {
+    let size = format!("{}×{}", image.width, image.height);
+    match &image.file_name {
+        Some(name) => format!("{name} · {size}"),
+        None => format!("Image {size}"),
+    }
 }
 
 /// Parses a TTL setting such as `24h` or `90m`. Empty means the default and
@@ -358,6 +399,63 @@ mod tests {
         history.set_ttl(Some(Duration::from_secs(60)));
         history.add("short lived", 0).unwrap();
         assert_eq!(history.prune_expired(61_000).unwrap(), 1);
+    }
+
+    fn image(png: &[u8], file_name: Option<&str>) -> Image {
+        Image {
+            png: png.to_vec(),
+            width: 1200,
+            height: 800,
+            file_name: file_name.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn add_image_stores_a_labelled_clip_and_its_bytes() {
+        let (_dir, path, mut history) = open_temp();
+        let shot = image(b"png bytes", Some("Screenshot 2026-11-17 at 10.02.png"));
+        assert_eq!(history.add_image(&shot, 100).unwrap(), Added::New);
+        assert_eq!(
+            history.add_image(&image(b"other", None), 200).unwrap(),
+            Added::New
+        );
+
+        assert_eq!(
+            contents(&history),
+            [
+                "Image 1200×800",
+                "Screenshot 2026-11-17 at 10.02.png · 1200×800"
+            ]
+        );
+        let clip = &history.clips()[1];
+        assert_eq!(clip.kind, Kind::Image);
+        assert_eq!(clip.hash, hash_bytes(b"png bytes"));
+        assert_eq!(history.image_data(&clip.hash).unwrap(), b"png bytes");
+
+        drop(history);
+        let reopened = open(&path);
+        assert_eq!(reopened.clips()[1].kind, Kind::Image);
+        assert_eq!(
+            reopened.image_data(&hash_bytes(b"other")).unwrap(),
+            b"other"
+        );
+    }
+
+    #[test]
+    fn adding_a_known_image_bumps_it() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add_image(&image(b"png", None), 100).unwrap();
+        history.add("text", 200).unwrap();
+        assert_eq!(
+            history.add_image(&image(b"png", None), 300).unwrap(),
+            Added::Bumped
+        );
+        assert_eq!(contents(&history), ["Image 1200×800", "text"]);
+    }
+
+    #[test]
+    fn hash_content_is_hash_bytes_of_the_text() {
+        assert_eq!(hash_content("hello"), hash_bytes(b"hello"));
     }
 
     #[test]

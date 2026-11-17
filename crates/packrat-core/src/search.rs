@@ -90,6 +90,7 @@ mod tests {
                 content: (*content).to_owned(),
                 created_at: 0,
                 pinned: false,
+                kind: crate::db::Kind::Text,
             })
             .collect()
     }

@@ -9,6 +9,7 @@ const { listen } = window.__TAURI__.event;
 const filter = document.getElementById("filter");
 const list = document.getElementById("list");
 const preview = document.getElementById("preview");
+const image = document.getElementById("image");
 const meta = document.getElementById("meta");
 const hint = document.getElementById("hint");
 const count = document.getElementById("count");
@@ -29,6 +30,8 @@ let pendingDelete = null;
 let canPaste = false;
 let listRequest = 0;
 let previewRequest = 0;
+// Object URL of the image in the preview, revoked when it is replaced.
+let imageUrl = null;
 
 function rows() {
   return listing ? listing.rows : [];
@@ -110,29 +113,60 @@ function renderStatus() {
   }
 }
 
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function showImage(url) {
+  if (imageUrl) URL.revokeObjectURL(imageUrl);
+  imageUrl = url;
+  if (url) {
+    image.src = url;
+  } else {
+    image.removeAttribute("src");
+  }
+  image.hidden = url === null;
+  preview.hidden = url !== null;
+}
+
 async function renderPreview() {
   const request = ++previewRequest;
   const row = selectedRow();
   if (!row) {
     preview.textContent = "";
+    showImage(null);
     meta.textContent = "";
     return;
   }
   let text = "";
+  let url = null;
   let details = "";
   try {
-    const shown = await invoke("preview_clip", { hash: row.hash });
-    const parts = [`${shown.chars.toLocaleString()} characters`];
-    if (row.pinned) parts.push("pinned");
-    if (shown.truncated) parts.push("showing the first 100 KB");
-    text = shown.text;
+    const parts = [];
+    if (row.image) {
+      const bytes = await invoke("image_clip", { hash: row.hash });
+      url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      parts.push(`PNG, ${formatBytes(bytes.byteLength)}`);
+    } else {
+      const shown = await invoke("preview_clip", { hash: row.hash });
+      parts.push(`${shown.chars.toLocaleString()} characters`);
+      if (shown.truncated) parts.push("showing the first 100 KB");
+      text = shown.text;
+    }
+    if (row.pinned) parts.splice(1, 0, "pinned");
     details = parts.join(" • ");
   } catch (err) {
     details = String(err);
   }
-  if (request !== previewRequest) return;
+  if (request !== previewRequest) {
+    if (url) URL.revokeObjectURL(url);
+    return;
+  }
   preview.textContent = text;
   preview.scrollTop = 0;
+  showImage(url);
   meta.textContent = details;
 }
 

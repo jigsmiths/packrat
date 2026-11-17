@@ -136,6 +136,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::list_clips,
             commands::preview_clip,
+            commands::image_clip,
             commands::copy_clip,
             commands::paste_allowed,
             commands::open_accessibility_settings,
