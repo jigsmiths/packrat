@@ -25,3 +25,6 @@ jobs:
       # On its own, so the app's dependencies cannot enable features the core forgot to declare
       - run: cargo clippy -p packrat-core --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Fails when a dependency's license is not in about.toml
+      - run: cargo install cargo-about --version "^0.9" --features cli --locked
+      - run: cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o "$RUNNER_TEMP/licenses.txt" about.hbs

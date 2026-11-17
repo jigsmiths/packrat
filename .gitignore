@@ -1,4 +1,5 @@
 /target/
 /dist/
 /app/src-tauri/gen/schemas/
+/app/src-tauri/THIRD-PARTY-LICENSES.txt
 .DS_Store

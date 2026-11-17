@@ -3,9 +3,16 @@ default:
 
 app_bundle := "target/release/bundle/macos/Packrat.app"
 
+notices := "app/src-tauri/THIRD-PARTY-LICENSES.txt"
+bundle_config := "--config src-tauri/tauri.bundle.conf.json"
+
 # Build Packrat.app
-build:
-    cd app && cargo tauri build
+build: licenses
+    cd app && cargo tauri build {{bundle_config}}
+
+# Write the third-party license notices that ship inside Packrat.app
+licenses:
+    cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o {{notices}} about.hbs
 
 # Run from source as "Packrat Dev", which keeps its own data and permissions
 run:
@@ -17,8 +24,8 @@ install: build
     cp -R {{app_bundle}} /Applications/
 
 # Build Packrat.app as the given version and zip it into dist/, as the release workflow does
-package version:
-    cd app && cargo tauri build --config '{"version":"{{version}}"}'
+package version: licenses
+    cd app && cargo tauri build {{bundle_config}} --config '{"version":"{{version}}"}'
     mkdir -p dist
     ditto -c -k --keepParent {{app_bundle}} dist/Packrat-{{version}}.zip
 

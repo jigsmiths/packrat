@@ -42,6 +42,7 @@ Edits take effect within a second. If a value is invalid, Packrat keeps the prev
 - Rust (stable), via [rustup](https://rustup.rs)
 - [just](https://github.com/casey/just)
 - Tauri CLI: `cargo install tauri-cli --version "^2" --locked`
+- cargo-about, for `just build` and `just install`: `cargo install cargo-about --version "^0.9" --features cli --locked`
 
 ## Development
 
@@ -63,3 +64,5 @@ just install   # build and copy Packrat.app into /Applications
 ## License
 
 [MIT](LICENSE)
+
+The licenses of the software Packrat is built with ship inside the app, at `Packrat.app/Contents/Resources/THIRD-PARTY-LICENSES.txt`.

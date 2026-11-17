@@ -67,6 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: extractions/setup-just@v2
       - run: cargo install tauri-cli --version "^2" --locked
+      - run: cargo install cargo-about --version "^0.9" --features cli --locked
       # A stable identity keeps the Accessibility and Keychain grants across
       # upgrades. Tauri's own APPLE_CERTIFICATE import only accepts
       # Apple-issued certificates, so a self-signed one is imported here.
