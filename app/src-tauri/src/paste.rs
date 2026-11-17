@@ -19,6 +19,7 @@ extern "C" {
 
 /// Whether macOS lets this process send keystrokes. The user grants it under
 /// Privacy & Security > Accessibility, and the answer can change while running.
+#[allow(unsafe_code)]
 pub fn allowed() -> bool {
     // SAFETY: takes no arguments and only reads this process's trust state.
     unsafe { AXIsProcessTrusted() != 0 }
