@@ -15,6 +15,7 @@ pub fn prepare(window: &WebviewWindow) -> tauri::Result<()> {
     let ns_window = window.ns_window()?.cast::<NSWindow>();
     // SAFETY: Tauri returns a valid NSWindow that outlives this call, and
     // setup runs on the main thread.
+    #[allow(unsafe_code)]
     let ns_window = unsafe { &*ns_window };
     ns_window.setCollectionBehavior(
         ns_window.collectionBehavior()

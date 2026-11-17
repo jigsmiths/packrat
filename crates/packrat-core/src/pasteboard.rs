@@ -45,6 +45,7 @@ impl Pasteboard for SystemPasteboard {
                 .map(|types| types.iter().map(|name| name.to_string()).collect())
                 .unwrap_or_default();
             // SAFETY: NSPasteboardTypeString is an immutable constant exported by AppKit.
+            #[allow(unsafe_code)]
             let text = pasteboard
                 .stringForType(unsafe { NSPasteboardTypeString })
                 .map(|text| text.to_string());
@@ -60,6 +61,7 @@ impl Pasteboard for SystemPasteboard {
 
 impl SystemPasteboard {
     /// Replaces the pasteboard contents with `text`.
+    #[allow(unsafe_code)]
     pub fn write_text(&self, text: &str) -> bool {
         autoreleasepool(|_| {
             let pasteboard = NSPasteboard::generalPasteboard();
