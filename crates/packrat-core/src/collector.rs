@@ -1,7 +1,7 @@
 //! Decides, one poll at a time, whether the pasteboard holds a clip worth keeping.
 
 use crate::history::{Added, History};
-use crate::pasteboard::Pasteboard;
+use crate::pasteboard::{Pasteboard, MAX_IMAGE_BYTES};
 use crate::Result;
 
 const PRUNE_INTERVAL_MS: i64 = 60_000;
@@ -79,9 +79,19 @@ impl Collector {
         if snapshot.concealed {
             return Ok(poll);
         }
-        if let Some(text) = snapshot.text.filter(|text| !text.is_empty()) {
-            poll.added = Some(history.add(&text, now_ms)?);
-        }
+        let image = snapshot
+            .image
+            .filter(|image| image.png.len() <= MAX_IMAGE_BYTES);
+        let text = snapshot.text.filter(|text| !text.is_empty());
+        poll.added = match (image, text) {
+            // The text next to a copied file is only its name.
+            (Some(image), _) if image.file_name.is_some() => {
+                Some(history.add_image(&image, now_ms)?)
+            }
+            (_, Some(text)) => Some(history.add(&text, now_ms)?),
+            (Some(image), None) => Some(history.add_image(&image, now_ms)?),
+            (None, None) => None,
+        };
         Ok(poll)
     }
 }
@@ -95,7 +105,7 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::history::hash_content;
-    use crate::pasteboard::Snapshot;
+    use crate::pasteboard::{Image, Snapshot};
 
     const HOUR: i64 = 60 * 60 * 1000;
 
@@ -103,6 +113,7 @@ mod tests {
     struct FakePasteboard {
         change_count: Cell<isize>,
         text: RefCell<Option<String>>,
+        image: RefCell<Option<Image>>,
         concealed: Cell<bool>,
         changing_mid_read: Cell<bool>,
     }
@@ -111,6 +122,15 @@ mod tests {
         fn copy(&self, text: &str) {
             self.change_count.set(self.change_count.get() + 1);
             *self.text.borrow_mut() = Some(text.to_owned());
+            *self.image.borrow_mut() = None;
+            self.concealed.set(false);
+        }
+
+        /// Copies image data, or with `text` an image file and its name.
+        fn copy_image(&self, image: Image, text: Option<&str>) {
+            self.change_count.set(self.change_count.get() + 1);
+            *self.text.borrow_mut() = text.map(str::to_owned);
+            *self.image.borrow_mut() = Some(image);
             self.concealed.set(false);
         }
 
@@ -122,6 +142,7 @@ mod tests {
         fn copy_non_text(&self) {
             self.change_count.set(self.change_count.get() + 1);
             *self.text.borrow_mut() = None;
+            *self.image.borrow_mut() = None;
             self.concealed.set(false);
         }
     }
@@ -138,6 +159,7 @@ mod tests {
             Some(Snapshot {
                 change_count: self.change_count.get(),
                 text: self.text.borrow().clone(),
+                image: self.image.borrow().clone(),
                 concealed: self.concealed.get(),
             })
         }
@@ -227,6 +249,78 @@ mod tests {
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         pasteboard.copy_non_text();
         collector.poll(&pasteboard, &mut history, 200).unwrap();
+        assert!(history.clips().is_empty());
+    }
+
+    fn image(png: Vec<u8>, file_name: Option<&str>) -> Image {
+        Image {
+            png,
+            width: 2,
+            height: 1,
+            file_name: file_name.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn image_data_is_captured() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::new(&pasteboard);
+
+        pasteboard.copy_image(image(b"png".to_vec(), None), None);
+        let poll = collector.poll(&pasteboard, &mut history, 100).unwrap();
+        assert_eq!(poll.added, Some(Added::New));
+        assert_eq!(contents(&history), ["Image 2×1"]);
+    }
+
+    #[test]
+    fn a_copied_image_file_beats_its_name() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::new(&pasteboard);
+
+        pasteboard.copy_image(image(b"png".to_vec(), Some("shot.png")), Some("shot.png"));
+        collector.poll(&pasteboard, &mut history, 100).unwrap();
+        assert_eq!(contents(&history), ["shot.png · 2×1"]);
+    }
+
+    #[test]
+    fn text_beats_image_data() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::new(&pasteboard);
+
+        pasteboard.copy_image(image(b"png".to_vec(), None), Some("caption"));
+        collector.poll(&pasteboard, &mut history, 100).unwrap();
+        assert_eq!(contents(&history), ["caption"]);
+    }
+
+    #[test]
+    fn oversized_images_are_skipped() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::new(&pasteboard);
+        let huge = vec![0; MAX_IMAGE_BYTES + 1];
+
+        pasteboard.copy_image(image(huge.clone(), None), None);
+        collector.poll(&pasteboard, &mut history, 100).unwrap();
+        assert!(history.clips().is_empty());
+
+        // A copied file that is too big falls back to its name.
+        pasteboard.copy_image(image(huge, Some("big.png")), Some("big.png"));
+        collector.poll(&pasteboard, &mut history, 200).unwrap();
+        assert_eq!(contents(&history), ["big.png"]);
+    }
+
+    #[test]
+    fn concealed_images_are_skipped() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::new(&pasteboard);
+
+        pasteboard.copy_image(image(b"png".to_vec(), None), None);
+        pasteboard.concealed.set(true);
+        collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert!(history.clips().is_empty());
     }
 

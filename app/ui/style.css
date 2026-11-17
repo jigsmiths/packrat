@@ -134,6 +134,14 @@ main {
   cursor: text;
 }
 
+#image {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 8px 10px;
+  object-fit: contain;
+}
+
 #meta {
   flex: none;
   margin: 0;

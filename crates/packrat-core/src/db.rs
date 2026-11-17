@@ -27,6 +27,19 @@ CREATE TABLE IF NOT EXISTS clips (
 CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at);
 ";
 
+// Each step moves the schema up one `user_version`.
+const MIGRATIONS: [&str; 1] = ["
+ALTER TABLE clips ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clips ADD COLUMN data BLOB;
+"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Text = 0,
+    /// `content` is a label and the PNG bytes are in the `data` column.
+    Image = 1,
+}
+
 /// One stored clipboard entry. `created_at` is Unix time in milliseconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clip {
@@ -34,6 +47,7 @@ pub struct Clip {
     pub content: String,
     pub created_at: i64,
     pub pinned: bool,
+    pub kind: Kind,
 }
 
 pub struct Db {
@@ -54,12 +68,7 @@ impl Db {
             .open(path)?;
 
         let conn = Connection::open(path)?;
-        let mut pragma = String::from("PRAGMA key = \"x'");
-        for byte in key {
-            write!(pragma, "{byte:02x}").expect("writing to a String cannot fail");
-        }
-        pragma.push_str("'\";");
-        conn.execute_batch(&pragma)?;
+        conn.execute_batch(&key_pragma(key))?;
 
         // The key is only checked when the first page is read.
         conn.execute_batch(SCHEMA).map_err(|err| match err {
@@ -70,9 +79,21 @@ impl Db {
         })?;
 
         let db = Self { conn };
+        db.migrate()?;
         // Best effort: a failed vacuum must not block startup.
         let _ = db.vacuum_if_fragmented();
         Ok(db)
+    }
+
+    fn migrate(&self) -> Result<()> {
+        let version = usize::try_from(self.pragma_i64("user_version")?).unwrap_or(0);
+        for (index, step) in MIGRATIONS.iter().enumerate().skip(version) {
+            self.conn.execute_batch(&format!(
+                "BEGIN; {step} PRAGMA user_version = {}; COMMIT;",
+                index + 1
+            ))?;
+        }
+        Ok(())
     }
 
     fn vacuum_if_fragmented(&self) -> Result<()> {
@@ -91,18 +112,35 @@ impl Db {
     }
 
     pub fn insert(&self, clip: &Clip) -> Result<()> {
+        self.insert_with_data(clip, None)
+    }
+
+    /// Stores an image clip with its PNG bytes.
+    pub fn insert_image(&self, clip: &Clip, png: &[u8]) -> Result<()> {
+        self.insert_with_data(clip, Some(png))
+    }
+
+    fn insert_with_data(&self, clip: &Clip, data: Option<&[u8]>) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO clips (hash, content, created_at, pinned) VALUES (?1, ?2, ?3, ?4)",
-            params![clip.hash, clip.content, clip.created_at, clip.pinned],
+            "INSERT INTO clips (hash, content, created_at, pinned, kind, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                clip.hash,
+                clip.content,
+                clip.created_at,
+                clip.pinned,
+                clip.kind as i64,
+                data
+            ],
         )?;
         Ok(())
     }
 
-    /// Returns all clips, oldest first.
+    /// Returns all clips, oldest first. Image bytes stay on disk, see `load_data`.
     pub fn load_all(&self) -> Result<Vec<Clip>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT hash, content, created_at, pinned FROM clips ORDER BY created_at")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT hash, content, created_at, pinned, kind FROM clips ORDER BY created_at",
+        )?;
         let clips = stmt
             .query_map([], |row| {
                 Ok(Clip {
@@ -110,10 +148,28 @@ impl Db {
                     content: row.get(1)?,
                     created_at: row.get(2)?,
                     pinned: row.get(3)?,
+                    kind: match row.get::<_, i64>(4)? {
+                        1 => Kind::Image,
+                        _ => Kind::Text,
+                    },
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(clips)
+    }
+
+    /// The PNG bytes of an image clip.
+    pub fn load_data(&self, hash: &str) -> Result<Vec<u8>> {
+        let data: Option<Vec<u8>> = self
+            .conn
+            .query_row("SELECT data FROM clips WHERE hash = ?1", [hash], |row| {
+                row.get(0)
+            })
+            .map_err(|err| match err {
+                rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
+                other => Error::Sqlite(other),
+            })?;
+        data.ok_or(Error::NotFound)
     }
 
     pub fn delete(&self, hash: &str) -> Result<()> {
@@ -148,6 +204,15 @@ impl Db {
     }
 }
 
+fn key_pragma(key: &Key) -> String {
+    let mut pragma = String::from("PRAGMA key = \"x'");
+    for byte in key {
+        write!(pragma, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    pragma.push_str("'\";");
+    pragma
+}
+
 fn found(rows_changed: usize) -> Result<()> {
     if rows_changed == 0 {
         Err(Error::NotFound)
@@ -170,6 +235,14 @@ mod tests {
             content: content.into(),
             created_at,
             pinned: false,
+            kind: Kind::Text,
+        }
+    }
+
+    fn image(hash: &str, created_at: i64) -> Clip {
+        Clip {
+            kind: Kind::Image,
+            ..clip(hash, "Image 1×1", created_at)
         }
     }
 
@@ -262,6 +335,63 @@ mod tests {
         pinned.pinned = true;
         db.insert(&pinned).unwrap();
         assert_eq!(db.load_all().unwrap(), vec![pinned]);
+    }
+
+    #[test]
+    fn new_database_is_at_the_latest_version() {
+        let (_dir, db) = open_temp();
+        assert_eq!(
+            db.pragma_i64("user_version").unwrap(),
+            MIGRATIONS.len() as i64
+        );
+    }
+
+    #[test]
+    fn version_0_database_is_migrated_with_its_rows() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("packrat.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&key_pragma(&KEY)).unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute(
+                "INSERT INTO clips (hash, content, created_at, pinned) VALUES ('h1', 'one', 1, 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = Db::open(&path, &KEY).unwrap();
+        let mut pinned = clip("h1", "one", 1);
+        pinned.pinned = true;
+        assert_eq!(db.load_all().unwrap(), vec![pinned]);
+        assert_eq!(db.pragma_i64("user_version").unwrap(), 1);
+
+        // Opening again does not run the migration a second time.
+        drop(db);
+        Db::open(&path, &KEY).unwrap();
+    }
+
+    #[test]
+    fn image_bytes_round_trip_but_stay_out_of_load_all() {
+        let (_dir, db) = open_temp();
+        let png = vec![0x89, b'P', b'N', b'G', 0, 1, 2, 255];
+        db.insert_image(&image("img", 1), &png).unwrap();
+        db.insert(&clip("txt", "text", 2)).unwrap();
+
+        assert_eq!(
+            db.load_all().unwrap(),
+            vec![image("img", 1), clip("txt", "text", 2)]
+        );
+        assert_eq!(db.load_data("img").unwrap(), png);
+    }
+
+    #[test]
+    fn text_and_missing_clips_have_no_data() {
+        let (_dir, db) = open_temp();
+        db.insert(&clip("txt", "text", 1)).unwrap();
+        assert!(matches!(db.load_data("txt"), Err(Error::NotFound)));
+        assert!(matches!(db.load_data("nope"), Err(Error::NotFound)));
     }
 
     #[test]

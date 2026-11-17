@@ -1,9 +1,11 @@
 //! Commands the popup calls.
 
+use packrat_core::db::Kind;
 use packrat_core::history::History;
 use packrat_core::pasteboard::SystemPasteboard;
 use packrat_core::search::search;
 use serde::Serialize;
+use tauri::ipc::Response;
 use tauri::{AppHandle, State};
 
 use crate::capture::now_ms;
@@ -19,6 +21,7 @@ pub struct Row {
     hash: String,
     summary: String,
     pinned: bool,
+    image: bool,
 }
 
 #[derive(Serialize)]
@@ -97,6 +100,7 @@ pub fn list_clips(state: State<AppState>, query: String) -> Result<Listing, Stri
                     hash: clip.hash.clone(),
                     summary: summarize(&clip.content),
                     pinned: clip.pinned,
+                    image: clip.kind == Kind::Image,
                 })
                 .collect(),
         })
@@ -115,6 +119,17 @@ pub fn preview_clip(state: State<AppState>, hash: String) -> Result<Preview, Str
     })
 }
 
+/// The PNG bytes of an image clip, sent raw rather than as JSON.
+#[tauri::command]
+pub fn image_clip(state: State<AppState>, hash: String) -> Result<Response, String> {
+    with_history(&state, |history| history.image_data(&hash)).map(Response::new)
+}
+
+enum Payload {
+    Text(String),
+    Image(Vec<u8>),
+}
+
 /// Puts the clip on the pasteboard, moves it to the top and hides the popup.
 /// With `paste` it then pastes into the app the user came from. Returns
 /// whether it pasted, which needs the Accessibility permission.
@@ -125,17 +140,25 @@ pub fn copy_clip(
     hash: String,
     paste: bool,
 ) -> Result<bool, String> {
-    let content = with_history(&state, |history| {
-        let content = history
+    let payload = with_history(&state, |history| {
+        let (kind, content) = history
             .clips()
             .iter()
             .find(|clip| clip.hash == hash)
-            .map(|clip| clip.content.clone())
+            .map(|clip| (clip.kind, clip.content.clone()))
             .ok_or(packrat_core::Error::NotFound)?;
+        let payload = match kind {
+            Kind::Text => Payload::Text(content),
+            Kind::Image => Payload::Image(history.image_data(&hash)?),
+        };
         history.touch(&hash, now_ms())?;
-        Ok(content)
+        Ok(payload)
     })?;
-    if !SystemPasteboard.write_text(&content) {
+    let written = match &payload {
+        Payload::Text(text) => SystemPasteboard.write_text(text),
+        Payload::Image(png) => SystemPasteboard.write_image(png),
+    };
+    if !written {
         return Err("could not write to the clipboard".to_owned());
     }
     popup::hide(&app, true);
