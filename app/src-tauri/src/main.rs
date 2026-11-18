@@ -1,3 +1,4 @@
+mod about;
 mod capture;
 mod commands;
 mod config;
@@ -143,6 +144,8 @@ fn main() {
             commands::toggle_pin,
             commands::delete_clip,
             commands::hide_popup,
+            about::about_info,
+            about::open_link,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Packrat");

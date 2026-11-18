@@ -9,13 +9,14 @@ use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-use crate::{popup, storage, AppState};
+use crate::{about, popup, storage, AppState};
 
 const TRAY_ID: &str = "main";
 const OPEN: &str = "open";
 const PAUSE: &str = "pause";
 const LAUNCH_AT_LOGIN: &str = "launch-at-login";
 const RESET: &str = "reset";
+const ABOUT: &str = "about";
 const QUIT: &str = "quit";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -102,6 +103,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             None::<&str>,
         )?)?;
     }
+    menu.append(&MenuItem::with_id(
+        app,
+        ABOUT,
+        "About Packrat",
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?)?;
     Ok(menu)
@@ -141,6 +149,7 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         }
         LAUNCH_AT_LOGIN => toggle_launch_at_login(app),
         RESET => confirm_reset(app),
+        ABOUT => about::show(app),
         QUIT => app.exit(0),
         _ => {}
     }
