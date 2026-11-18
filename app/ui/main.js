@@ -106,10 +106,9 @@ function renderStatus() {
 
   if (!listing) {
     count.textContent = "";
-  } else if (filter.value) {
-    count.textContent = `${listing.matched} of ${listing.total}`;
   } else {
-    count.textContent = `${listing.total} clips`;
+    const clips = filter.value ? `${listing.matched} of ${listing.total}` : `${listing.total} clips`;
+    count.textContent = `${clips} • ${formatBytes(listing.total_size)}`;
   }
 }
 
@@ -148,14 +147,15 @@ async function renderPreview() {
     if (row.image) {
       const bytes = await invoke("image_clip", { hash: row.hash });
       url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-      parts.push(`PNG, ${formatBytes(bytes.byteLength)}`);
+      parts.push(`PNG, ${formatBytes(row.size)}`);
     } else {
       const shown = await invoke("preview_clip", { hash: row.hash });
-      parts.push(`${shown.chars.toLocaleString()} characters`);
+      parts.push(`${shown.chars.toLocaleString()} characters`, formatBytes(row.size));
       if (shown.truncated) parts.push("showing the first 100 KB");
       text = shown.text;
     }
-    if (row.pinned) parts.splice(1, 0, "pinned");
+    // After the size, before the truncation note.
+    if (row.pinned) parts.splice(row.image ? 1 : 2, 0, "pinned");
     details = parts.join(" • ");
   } catch (err) {
     details = String(err);

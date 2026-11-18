@@ -44,6 +44,11 @@ impl History {
         &self.clips
     }
 
+    /// Bytes held across every clip.
+    pub fn total_size(&self) -> usize {
+        self.clips.iter().map(|clip| clip.size).sum()
+    }
+
     /// `None` disables expiry.
     pub fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
@@ -62,6 +67,7 @@ impl History {
             created_at: now_ms,
             pinned: false,
             kind: Kind::Text,
+            size: content.len(),
         };
         self.db.insert(&clip)?;
         self.clips.push(clip);
@@ -82,6 +88,7 @@ impl History {
             created_at: now_ms,
             pinned: false,
             kind: Kind::Image,
+            size: image.png.len(),
         };
         self.db.insert_image(&clip, &image.png)?;
         self.clips.push(clip);
@@ -451,6 +458,24 @@ mod tests {
             Added::Bumped
         );
         assert_eq!(contents(&history), ["Image 1200×800", "text"]);
+    }
+
+    #[test]
+    fn sizes_count_text_and_image_bytes() {
+        let (_dir, path, mut history) = open_temp();
+        history.add("héllo", 100).unwrap();
+        history.add_image(&image(b"png bytes", None), 200).unwrap();
+        let sizes: Vec<_> = history.clips().iter().map(|c| c.size).collect();
+        assert_eq!(sizes, [9, 6]);
+        assert_eq!(history.total_size(), 15);
+
+        drop(history);
+        let mut reopened = open(&path);
+        let sizes: Vec<_> = reopened.clips().iter().map(|c| c.size).collect();
+        assert_eq!(sizes, [9, 6]);
+
+        reopened.delete(&hash_bytes(b"png bytes")).unwrap();
+        assert_eq!(reopened.total_size(), 6);
     }
 
     #[test]

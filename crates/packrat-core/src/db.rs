@@ -48,6 +48,8 @@ pub struct Clip {
     pub created_at: i64,
     pub pinned: bool,
     pub kind: Kind,
+    /// Bytes stored: the UTF-8 text, or the PNG for an image.
+    pub size: usize,
 }
 
 pub struct Db {
@@ -139,7 +141,9 @@ impl Db {
     /// Returns all clips, oldest first. Image bytes stay on disk, see `load_data`.
     pub fn load_all(&self) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(
-            "SELECT hash, content, created_at, pinned, kind FROM clips ORDER BY created_at",
+            "SELECT hash, content, created_at, pinned, kind,
+                    COALESCE(length(data), length(CAST(content AS BLOB)))
+             FROM clips ORDER BY created_at",
         )?;
         let clips = stmt
             .query_map([], |row| {
@@ -152,6 +156,7 @@ impl Db {
                         1 => Kind::Image,
                         _ => Kind::Text,
                     },
+                    size: usize::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -236,12 +241,14 @@ mod tests {
             created_at,
             pinned: false,
             kind: Kind::Text,
+            size: content.len(),
         }
     }
 
-    fn image(hash: &str, created_at: i64) -> Clip {
+    fn image(hash: &str, created_at: i64, size: usize) -> Clip {
         Clip {
             kind: Kind::Image,
+            size,
             ..clip(hash, "Image 1×1", created_at)
         }
     }
@@ -376,12 +383,12 @@ mod tests {
     fn image_bytes_round_trip_but_stay_out_of_load_all() {
         let (_dir, db) = open_temp();
         let png = vec![0x89, b'P', b'N', b'G', 0, 1, 2, 255];
-        db.insert_image(&image("img", 1), &png).unwrap();
+        db.insert_image(&image("img", 1, png.len()), &png).unwrap();
         db.insert(&clip("txt", "text", 2)).unwrap();
 
         assert_eq!(
             db.load_all().unwrap(),
-            vec![image("img", 1), clip("txt", "text", 2)]
+            vec![image("img", 1, png.len()), clip("txt", "text", 2)]
         );
         assert_eq!(db.load_data("img").unwrap(), png);
     }
