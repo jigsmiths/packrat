@@ -91,6 +91,7 @@ mod tests {
                 created_at: 0,
                 pinned: false,
                 kind: crate::db::Kind::Text,
+                size: content.len(),
             })
             .collect()
     }

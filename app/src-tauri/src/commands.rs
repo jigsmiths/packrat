@@ -22,6 +22,7 @@ pub struct Row {
     summary: String,
     pinned: bool,
     image: bool,
+    size: usize,
 }
 
 #[derive(Serialize)]
@@ -30,6 +31,8 @@ pub struct Listing {
     /// Matches before the row limit was applied.
     matched: usize,
     total: usize,
+    /// Bytes held across the whole history, not just the matches.
+    total_size: usize,
 }
 
 #[derive(Serialize)]
@@ -93,6 +96,7 @@ pub fn list_clips(state: State<AppState>, query: String) -> Result<Listing, Stri
         Ok(Listing {
             matched: matches.len(),
             total: history.clips().len(),
+            total_size: history.total_size(),
             rows: matches
                 .into_iter()
                 .take(MAX_ROWS)
@@ -101,6 +105,7 @@ pub fn list_clips(state: State<AppState>, query: String) -> Result<Listing, Stri
                     summary: summarize(&clip.content),
                     pinned: clip.pinned,
                     image: clip.kind == Kind::Image,
+                    size: clip.size,
                 })
                 .collect(),
         })
