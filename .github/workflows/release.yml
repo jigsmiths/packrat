@@ -1,8 +1,8 @@
-name: release
+name: Release
 
 on:
-  workflow_run: # after ci passed on main
-    workflows: [ci]
+  workflow_run: # after CI passed on main
+    workflows: [CI]
     types: [completed]
     branches: [main]
   workflow_dispatch: # publish the latest tag again, after a failed release
@@ -21,14 +21,14 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }} # the commit ci tested
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
-      - run: go install github.com/caarlos0/svu/v3@v3.4.0
+      - run: go install github.com/caarlos0/svu/v3@v3.4.4
       - name: Tag the next version, if the commits call for one
         id: tag
         run: |
@@ -59,13 +59,13 @@ jobs:
     env:
       TAG: ${{ needs.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.tag.outputs.tag }}
       # With no arguments this installs what rust-toolchain.toml asks for
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - run: cargo install tauri-cli --version "^2" --locked
       - run: cargo install cargo-about --version "^0.9" --features cli --locked
       # A stable identity keeps the Accessibility and Keychain grants across
@@ -121,7 +121,7 @@ jobs:
             gh release create "$TAG" "$ZIP" --title "$TAG" --generate-notes
           fi
       - name: Checkout Homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jigsmiths/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
