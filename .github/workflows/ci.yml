@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
   check:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # With no arguments this installs what rust-toolchain.toml asks for
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
