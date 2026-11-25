@@ -6,7 +6,7 @@ use packrat_core::collector::Collector;
 use packrat_core::pasteboard::SystemPasteboard;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{config, AppState};
+use crate::{config, AppState, HistoryState};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -29,7 +29,7 @@ pub fn spawn(app: AppHandle, mut config: config::Watcher) {
             collector.set_paused(state.paused.load(Ordering::Relaxed));
 
             let mut history = state.history();
-            let Some(history) = history.as_mut() else {
+            let HistoryState::Open(history) = &mut *history else {
                 continue;
             };
             match collector.poll(&pasteboard, history, now_ms()) {

@@ -19,21 +19,40 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_log::{Target, TargetKind};
 
 #[derive(Default)]
+pub enum HistoryState {
+    #[default]
+    NotOpened,
+    Open(History),
+    Failed(String),
+}
+
+impl HistoryState {
+    pub fn problem(&self) -> Option<&str> {
+        match self {
+            Self::Failed(problem) => Some(problem),
+            Self::NotOpened | Self::Open(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum SettingsState {
+    #[default]
+    Loading,
+    Loaded(Settings),
+}
+
+#[derive(Default)]
 pub struct AppState {
-    history: Mutex<Option<History>>,
-    problem: Mutex<Option<String>>,
+    history: Mutex<HistoryState>,
     settings_problem: Mutex<Option<String>>,
-    settings: Mutex<Option<Settings>>,
+    settings: Mutex<SettingsState>,
     pub paused: AtomicBool,
 }
 
 impl AppState {
-    pub fn history(&self) -> MutexGuard<'_, Option<History>> {
+    pub fn history(&self) -> MutexGuard<'_, HistoryState> {
         self.history.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    pub fn problem(&self) -> MutexGuard<'_, Option<String>> {
-        self.problem.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn settings_problem(&self) -> MutexGuard<'_, Option<String>> {
@@ -42,27 +61,31 @@ impl AppState {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub fn settings(&self) -> Option<Settings> {
+    pub fn settings(&self) -> SettingsState {
         *self.settings.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn set_settings(&self, settings: Settings) {
-        *self.settings.lock().unwrap_or_else(PoisonError::into_inner) = Some(settings);
-        if let Some(history) = self.history().as_mut() {
-            history.set_ttl(settings.ttl);
-        }
+        *self.settings.lock().unwrap_or_else(PoisonError::into_inner) =
+            SettingsState::Loaded(settings);
+        self.apply_ttl(&mut self.history());
     }
 
     pub fn set_history(&self, opened: Result<History, String>) {
-        let (mut history, problem) = match opened {
-            Ok(history) => (Some(history), None),
-            Err(problem) => (None, Some(problem)),
+        let mut history = match opened {
+            Ok(history) => HistoryState::Open(history),
+            Err(problem) => HistoryState::Failed(problem),
         };
-        if let (Some(history), Some(settings)) = (history.as_mut(), self.settings()) {
+        self.apply_ttl(&mut history);
+        *self.history() = history;
+    }
+
+    fn apply_ttl(&self, history: &mut HistoryState) {
+        if let (HistoryState::Open(history), SettingsState::Loaded(settings)) =
+            (history, self.settings())
+        {
             history.set_ttl(settings.ttl);
         }
-        *self.history() = history;
-        *self.problem() = problem;
     }
 }
 
@@ -116,6 +139,7 @@ fn main() {
             }
             tray::create(handle)?;
 
+            config::write_default_if_missing(handle)?;
             let mut config = config::Watcher::new(handle)?;
             config.poll(handle);
             capture::spawn(handle.clone(), config);
