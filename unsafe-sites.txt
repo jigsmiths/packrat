@@ -1,0 +1,2 @@
+app/src-tauri/src/popup.rs:1
+crates/packrat-core/src/pasteboard.rs:1

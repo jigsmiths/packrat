@@ -163,7 +163,7 @@ fn to_png(bytes: Vec<u8>) -> Option<Image> {
     let rep = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(&bytes))?;
     let properties = NSDictionary::<NSString, AnyObject>::new();
     // SAFETY: an empty dictionary has no values of the wrong type.
-    #[allow(unsafe_code)]
+    #[expect(unsafe_code, reason = "objc2 marks this AppKit call unsafe")]
     let png =
         unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties) }?;
     Some(Image {

@@ -11,7 +11,7 @@ pub fn follow_active_space(window: &WebviewWindow) -> tauri::Result<()> {
     let ns_window = window.ns_window()?.cast::<NSWindow>();
     // SAFETY: Tauri returns a valid NSWindow that outlives this call, and
     // setup runs on the main thread.
-    #[allow(unsafe_code)]
+    #[expect(unsafe_code, reason = "Tauri hands out the NSWindow as a raw pointer")]
     let ns_window = unsafe { &*ns_window };
     ns_window.setCollectionBehavior(
         ns_window.collectionBehavior()

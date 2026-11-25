@@ -45,3 +45,4 @@ check:
     just lint
     just test
     ! grep -rn innerHTML app/ui
+    scripts/check-unsafe-sites.sh

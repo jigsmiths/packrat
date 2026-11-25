@@ -27,6 +27,8 @@ jobs:
       - run: cargo test --workspace
       - name: Clip text never goes through innerHTML
         run: "! grep -rn innerHTML app/ui"
+      - name: Unsafe code stays in the listed files
+        run: scripts/check-unsafe-sites.sh
       - run: cargo install cargo-about --version "^0.9" --features cli --locked
       - name: Check dependency licenses
         run: cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o "$RUNNER_TEMP/licenses.txt" about.hbs
