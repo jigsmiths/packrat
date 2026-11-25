@@ -7,7 +7,7 @@ pub const LABEL: &str = "main";
 
 const SHOWN: &str = "popup-shown";
 
-pub fn prepare(window: &WebviewWindow) -> tauri::Result<()> {
+pub fn follow_active_space(window: &WebviewWindow) -> tauri::Result<()> {
     let ns_window = window.ns_window()?.cast::<NSWindow>();
     // SAFETY: Tauri returns a valid NSWindow that outlives this call, and
     // setup runs on the main thread.
@@ -35,14 +35,19 @@ pub fn show(app: &AppHandle) {
     }
 }
 
-pub fn hide(app: &AppHandle, restore_focus: bool) {
+pub enum Focus {
+    ReturnToPrevious,
+    Stay,
+}
+
+pub fn hide(app: &AppHandle, focus: Focus) {
     let previous = focus::take();
     if let Some(window) = app.get_webview_window(LABEL) {
         if let Err(err) = window.hide() {
             log::error!("could not hide the popup: {err}");
         }
     }
-    if let Some(pid) = previous.filter(|_| restore_focus) {
+    if let (Some(pid), Focus::ReturnToPrevious) = (previous, focus) {
         if !focus::activate(pid) {
             log::warn!("could not return focus to the previous app");
         }
@@ -55,7 +60,7 @@ pub fn toggle(app: &AppHandle) {
         .and_then(|window| window.is_visible().ok())
         .unwrap_or(false);
     if visible {
-        hide(app, true);
+        hide(app, Focus::ReturnToPrevious);
     } else {
         show(app);
     }

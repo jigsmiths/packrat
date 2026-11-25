@@ -2,7 +2,7 @@ use packrat_core::db::Kind;
 use packrat_core::history::History;
 use packrat_core::pasteboard::SystemPasteboard;
 use packrat_core::search::search;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
 use tauri::{AppHandle, State};
 
@@ -27,9 +27,23 @@ pub struct Row {
 #[derive(Serialize)]
 pub struct Listing {
     rows: Vec<Row>,
-    matched: usize,
+    matched_before_limit: usize,
     total: usize,
     total_size: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Action {
+    Copy,
+    Paste,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Outcome {
+    Copied,
+    Pasted,
 }
 
 #[derive(Serialize)]
@@ -87,7 +101,7 @@ pub fn list_clips(state: State<AppState>, query: String) -> Result<Listing, Stri
     with_history(&state, |history| {
         let matches = search(history.clips(), &query);
         Ok(Listing {
-            matched: matches.len(),
+            matched_before_limit: matches.len(),
             total: history.clips().len(),
             total_size: history.total_size(),
             rows: matches
@@ -134,8 +148,8 @@ pub fn copy_clip(
     app: AppHandle,
     state: State<AppState>,
     hash: String,
-    paste: bool,
-) -> Result<bool, String> {
+    action: Action,
+) -> Result<Outcome, String> {
     let payload = with_history(&state, |history| {
         let (kind, content) = history
             .clips()
@@ -157,18 +171,22 @@ pub fn copy_clip(
     if !written {
         return Err("could not write to the clipboard".to_owned());
     }
-    popup::hide(&app, true);
-    let pasted = paste && paste::allowed();
-    if pasted {
-        paste::send_after_delay();
-    }
-    log::info!("clip copied: {} pasted={pasted}", short(&hash));
-    Ok(pasted)
+    popup::hide(&app, popup::Focus::ReturnToPrevious);
+    let outcome = match action {
+        Action::Paste if paste::accessibility_trusted() => {
+            paste::send_after_delay();
+            Outcome::Pasted
+        }
+        Action::Paste | Action::Copy => Outcome::Copied,
+    };
+    let pasted = matches!(outcome, Outcome::Pasted);
+    log::info!("clip copied: {} pasted={pasted}", log_id(&hash));
+    Ok(outcome)
 }
 
 #[tauri::command]
 pub fn paste_allowed() -> bool {
-    paste::allowed()
+    paste::accessibility_trusted()
 }
 
 #[tauri::command]
@@ -179,24 +197,24 @@ pub fn open_accessibility_settings() {
 #[tauri::command]
 pub fn toggle_pin(state: State<AppState>, hash: String) -> Result<bool, String> {
     let pinned = with_history(&state, |history| history.toggle_pin(&hash))?;
-    log::info!("clip pinned={pinned}: {}", short(&hash));
+    log::info!("clip pinned={pinned}: {}", log_id(&hash));
     Ok(pinned)
 }
 
 #[tauri::command]
 pub fn delete_clip(state: State<AppState>, hash: String) -> Result<(), String> {
     with_history(&state, |history| history.delete(&hash))?;
-    log::info!("clip deleted: {}", short(&hash));
+    log::info!("clip deleted: {}", log_id(&hash));
     Ok(())
 }
 
-fn short(hash: &str) -> &str {
+fn log_id(hash: &str) -> &str {
     hash.get(..8).unwrap_or(hash)
 }
 
 #[tauri::command]
 pub fn hide_popup(app: AppHandle) {
-    popup::hide(&app, true);
+    popup::hide(&app, popup::Focus::ReturnToPrevious);
 }
 
 #[cfg(test)]
