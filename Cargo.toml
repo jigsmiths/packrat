@@ -11,3 +11,7 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+[workspace.lints.clippy]
+let_underscore_must_use = "deny"
+disallowed_methods = "deny"

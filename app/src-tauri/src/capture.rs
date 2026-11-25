@@ -40,6 +40,10 @@ pub fn spawn(app: AppHandle, mut config: config::Watcher) {
                         poll.pruned,
                         history.clips().len()
                     );
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "the popup refreshes when shown, so a missed event is harmless"
+                    )]
                     let _ = app.emit(HISTORY_CHANGED, ());
                 }
                 Ok(_) => {}
