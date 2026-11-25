@@ -4,7 +4,7 @@ use std::time::Duration;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-const DELAY: Duration = Duration::from_millis(80);
+const REFOCUS_DELAY: Duration = Duration::from_millis(80);
 const KEY_V: u16 = 9;
 const ACCESSIBILITY_SETTINGS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
@@ -15,14 +15,14 @@ extern "C" {
 }
 
 #[allow(unsafe_code)]
-pub fn allowed() -> bool {
+pub fn accessibility_trusted() -> bool {
     // SAFETY: takes no arguments and only reads this process's trust state.
     unsafe { AXIsProcessTrusted() != 0 }
 }
 
 pub fn send_after_delay() {
     thread::spawn(|| {
-        thread::sleep(DELAY);
+        thread::sleep(REFOCUS_DELAY);
         if let Err(reason) = send() {
             log::error!("paste failed: {reason}");
         }

@@ -11,9 +11,13 @@ pub fn remember() {
     let frontmost = NSWorkspace::sharedWorkspace()
         .frontmostApplication()
         .map(|app| app.processIdentifier());
-    if let Some(pid) = frontmost.filter(|pid| *pid != std::process::id() as i32) {
+    if let Some(pid) = frontmost.filter(|pid| is_other_app(*pid)) {
         *PREVIOUS.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
     }
+}
+
+fn is_other_app(pid: i32) -> bool {
+    pid != std::process::id() as i32
 }
 
 pub fn take() -> Option<i32> {

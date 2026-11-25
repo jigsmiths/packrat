@@ -17,8 +17,7 @@ const PASTE_HINT = `Enter paste • ⌘↩ copy • ${OTHER_KEYS}`;
 const COPY_HINT = `Enter copy • ${OTHER_KEYS}`;
 const CONFIRM_HINT = "Delete this pinned clip? ⌘⌫ again to confirm, Esc to cancel";
 
-let listing = null;
-let failure = null;
+let clips = { kind: "loading" };
 let selectedHash = null;
 let pendingDelete = null;
 let canPaste = false;
@@ -27,7 +26,7 @@ let previewRequest = 0;
 let imageUrl = null;
 
 function rows() {
-  return listing ? listing.rows : [];
+  return clips.kind === "loaded" ? clips.listing.rows : [];
 }
 
 function selectedIndex() {
@@ -40,17 +39,15 @@ function selectedRow() {
 
 async function refresh() {
   const request = ++listRequest;
-  let answer = null;
-  let error = null;
+  let answer;
   try {
-    answer = await invoke("list_clips", { query: filter.value });
+    answer = { kind: "loaded", listing: await invoke("list_clips", { query: filter.value }) };
   } catch (err) {
-    error = String(err);
+    answer = { kind: "failed", reason: String(err) };
   }
   if (request !== listRequest) return;
 
-  listing = answer;
-  failure = error;
+  clips = answer;
   if (selectedIndex() === -1) {
     selectedHash = rows().length > 0 ? rows()[0].hash : null;
   }
@@ -80,7 +77,11 @@ function renderList() {
   if (items.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = failure ?? (filter.value ? "No matches" : "Nothing copied yet");
+    if (clips.kind === "failed") {
+      empty.textContent = clips.reason;
+    } else {
+      empty.textContent = filter.value ? "No matches" : "Nothing copied yet";
+    }
     items.push(empty);
   }
   list.replaceChildren(...items);
@@ -122,11 +123,14 @@ function renderStatus() {
   }
   permission.hidden = canPaste || pendingDelete !== null;
 
-  if (!listing) {
+  if (clips.kind !== "loaded") {
     count.textContent = "";
   } else {
-    const clips = filter.value ? `${listing.matched} of ${listing.total}` : `${listing.total} clips`;
-    count.textContent = `${clips} • ${formatBytes(listing.total_size)}`;
+    const { listing } = clips;
+    const label = filter.value
+      ? `${listing.matched_before_limit} of ${listing.total}`
+      : `${listing.total} clips`;
+    count.textContent = `${label} • ${formatBytes(listing.total_size)}`;
   }
 }
 
@@ -220,11 +224,11 @@ async function togglePin() {
   await refresh();
 }
 
-async function copySelected(paste) {
+async function copySelected(action) {
   const row = selectedRow();
   if (!row) return;
   try {
-    await invoke("copy_clip", { hash: row.hash, paste });
+    await invoke("copy_clip", { hash: row.hash, action });
   } catch (err) {
     console.error("copy_clip", err);
     await refresh();
@@ -284,7 +288,7 @@ window.addEventListener("keydown", (event) => {
   } else if (event.key === "ArrowUp" || (control && event.key === "p")) {
     move(-1);
   } else if (event.key === "Enter") {
-    copySelected(!event.metaKey);
+    copySelected(event.metaKey ? "copy" : "paste");
   } else if (command && event.key === "p") {
     togglePin();
   } else if (command && event.key === "Backspace") {
@@ -307,7 +311,7 @@ list.addEventListener("click", (event) => {
 });
 
 list.addEventListener("dblclick", (event) => {
-  if (event.target.closest("li[data-hash]")) copySelected(true);
+  if (event.target.closest("li[data-hash]")) copySelected("paste");
 });
 
 permission.addEventListener("click", () => {

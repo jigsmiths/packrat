@@ -135,7 +135,7 @@ fn main() {
             state.set_history(opened);
 
             if let Some(window) = handle.get_webview_window(popup::LABEL) {
-                popup::prepare(&window)?;
+                popup::follow_active_space(&window)?;
             }
             tray::create(handle)?;
 
@@ -147,7 +147,7 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if window.label() == popup::LABEL && matches!(event, WindowEvent::Focused(false)) {
-                popup::hide(window.app_handle(), false);
+                popup::hide(window.app_handle(), popup::Focus::Stay);
             }
         })
         .invoke_handler(tauri::generate_handler![
