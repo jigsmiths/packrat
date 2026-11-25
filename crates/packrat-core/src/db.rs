@@ -40,14 +40,11 @@ pub enum Kind {
     Image = 1,
 }
 
-/// One stored clipboard entry. Times are Unix time in milliseconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clip {
     pub hash: String,
     pub content: String,
-    /// When the content was first captured.
     pub created_at: i64,
-    /// When it was last captured or picked from the popup. Expiry and order use this.
     pub last_used_at: i64,
     pub pinned: bool,
     pub kind: Kind,
@@ -138,7 +135,6 @@ impl Db {
         Ok(())
     }
 
-    /// Returns all clips, least recently used first. Image bytes stay on disk, see `load_data`.
     pub fn load_all(&self) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(
             "SELECT hash, content, created_at, last_used_at, pinned, kind,
@@ -200,11 +196,10 @@ impl Db {
         found(changed)
     }
 
-    /// Deletes unpinned clips last used before `cutoff` and returns how many were removed.
-    pub fn delete_expired(&self, cutoff: i64) -> Result<usize> {
+    pub fn delete_expired(&self, last_used_before_ms: i64) -> Result<usize> {
         Ok(self.conn.execute(
             "DELETE FROM clips WHERE pinned = 0 AND last_used_at < ?1",
-            [cutoff],
+            [last_used_before_ms],
         )?)
     }
 }
@@ -327,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn load_all_returns_oldest_first() {
+    fn load_all_returns_least_recently_used_first() {
         let (_dir, db) = open_temp();
         db.insert(&clip("h2", "second", 200)).unwrap();
         db.insert(&clip("h1", "first", 100)).unwrap();

@@ -91,7 +91,6 @@ const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-// A short age such as "now", "12m", "3h" or "2d".
 function formatAge(timeMs) {
   const elapsed = Math.max(0, Date.now() - timeMs);
   if (elapsed < MINUTE_MS) return "now";

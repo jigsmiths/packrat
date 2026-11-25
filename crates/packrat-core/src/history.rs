@@ -120,6 +120,7 @@ impl History {
         Ok(())
     }
 
+    /// Removes unpinned clips not used within the TTL and returns how many went.
     pub fn prune_expired(&mut self, now_ms: i64) -> Result<usize> {
         let Some(ttl) = self.ttl else {
             return Ok(0);
