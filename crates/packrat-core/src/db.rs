@@ -135,7 +135,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn load_all(&self) -> Result<Vec<Clip>> {
+    pub fn load_without_image_data(&self) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(
             "SELECT hash, content, created_at, last_used_at, pinned, kind,
                     COALESCE(length(data), length(CAST(content AS BLOB)))
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn new_database_is_empty() {
         let (_dir, db) = open_temp();
-        assert!(db.load_all().unwrap().is_empty());
+        assert!(db.load_without_image_data().unwrap().is_empty());
     }
 
     #[test]
@@ -289,7 +289,10 @@ mod tests {
             .insert(&clip("h1", "one", 1))
             .unwrap();
         let reopened = Db::open(&path, &KEY).unwrap();
-        assert_eq!(reopened.load_all().unwrap(), vec![clip("h1", "one", 1)]);
+        assert_eq!(
+            reopened.load_without_image_data().unwrap(),
+            vec![clip("h1", "one", 1)]
+        );
     }
 
     #[test]
@@ -322,11 +325,16 @@ mod tests {
     }
 
     #[test]
-    fn load_all_returns_least_recently_used_first() {
+    fn load_without_image_data_returns_least_recently_used_first() {
         let (_dir, db) = open_temp();
         db.insert(&clip("h2", "second", 200)).unwrap();
         db.insert(&clip("h1", "first", 100)).unwrap();
-        let hashes: Vec<_> = db.load_all().unwrap().into_iter().map(|c| c.hash).collect();
+        let hashes: Vec<_> = db
+            .load_without_image_data()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.hash)
+            .collect();
         assert_eq!(hashes, ["h1", "h2"]);
     }
 
@@ -337,7 +345,7 @@ mod tests {
         let mut pinned = clip("h1", content, 1_700_000_000_123);
         pinned.pinned = true;
         db.insert(&pinned).unwrap();
-        assert_eq!(db.load_all().unwrap(), vec![pinned]);
+        assert_eq!(db.load_without_image_data().unwrap(), vec![pinned]);
     }
 
     #[test]
@@ -368,7 +376,7 @@ mod tests {
         let mut pinned = clip("h1", "one", 1);
         pinned.created_at_ms = 1;
         pinned.pinned = true;
-        assert_eq!(db.load_all().unwrap(), vec![pinned]);
+        assert_eq!(db.load_without_image_data().unwrap(), vec![pinned]);
         assert_eq!(
             db.pragma_i64("user_version").unwrap(),
             MIGRATIONS.len() as i64
@@ -379,14 +387,14 @@ mod tests {
     }
 
     #[test]
-    fn image_bytes_round_trip_but_stay_out_of_load_all() {
+    fn image_bytes_round_trip_but_stay_out_of_load_without_image_data() {
         let (_dir, db) = open_temp();
         let png = vec![0x89, b'P', b'N', b'G', 0, 1, 2, 255];
         db.insert_image(&image("img", 1, png.len()), &png).unwrap();
         db.insert(&clip("txt", "text", 2)).unwrap();
 
         assert_eq!(
-            db.load_all().unwrap(),
+            db.load_without_image_data().unwrap(),
             vec![image("img", 1, png.len()), clip("txt", "text", 2)]
         );
         assert_eq!(db.load_data("img").unwrap(), png);
@@ -413,7 +421,10 @@ mod tests {
         db.insert(&clip("h1", "one", 1)).unwrap();
         db.insert(&clip("h2", "two", 2)).unwrap();
         db.delete("h1").unwrap();
-        assert_eq!(db.load_all().unwrap(), vec![clip("h2", "two", 2)]);
+        assert_eq!(
+            db.load_without_image_data().unwrap(),
+            vec![clip("h2", "two", 2)]
+        );
     }
 
     #[test]
@@ -432,9 +443,9 @@ mod tests {
         let (_dir, db) = open_temp();
         db.insert(&clip("h1", "one", 1)).unwrap();
         db.set_pinned("h1", true).unwrap();
-        assert!(db.load_all().unwrap()[0].pinned);
+        assert!(db.load_without_image_data().unwrap()[0].pinned);
         db.set_pinned("h1", false).unwrap();
-        assert!(!db.load_all().unwrap()[0].pinned);
+        assert!(!db.load_without_image_data().unwrap()[0].pinned);
     }
 
     #[test]
@@ -444,7 +455,7 @@ mod tests {
         added.created_at_ms = 1;
         db.insert(&added).unwrap();
         db.set_last_used_at("h1", 99).unwrap();
-        let loaded = &db.load_all().unwrap()[0];
+        let loaded = &db.load_without_image_data().unwrap()[0];
         assert_eq!((loaded.created_at_ms, loaded.last_used_at_ms), (1, 99));
     }
 
@@ -467,7 +478,12 @@ mod tests {
         db.insert(&clip("new", "new", 900)).unwrap();
 
         assert_eq!(db.delete_expired(500).unwrap(), 1);
-        let hashes: Vec<_> = db.load_all().unwrap().into_iter().map(|c| c.hash).collect();
+        let hashes: Vec<_> = db
+            .load_without_image_data()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.hash)
+            .collect();
         assert_eq!(hashes, ["old-pinned", "edge", "new"]);
     }
 
@@ -489,7 +505,7 @@ mod tests {
         }
 
         let db = Db::open(&path, &KEY).unwrap();
-        let loaded = &db.load_all().unwrap()[0];
+        let loaded = &db.load_without_image_data().unwrap()[0];
         assert_eq!((loaded.created_at_ms, loaded.last_used_at_ms), (123, 123));
         assert!(loaded.pinned);
     }
@@ -514,7 +530,7 @@ mod tests {
 
         let reopened = Db::open(&path, &KEY).unwrap();
         assert_eq!(reopened.pragma_i64("freelist_count").unwrap(), 0);
-        assert_eq!(reopened.load_all().unwrap().len(), 10);
+        assert_eq!(reopened.load_without_image_data().unwrap().len(), 10);
     }
 
     #[test]

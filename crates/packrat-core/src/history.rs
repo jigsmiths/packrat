@@ -25,7 +25,7 @@ pub struct History {
 impl History {
     pub fn open(db: Db) -> Result<Self> {
         let mut history = Self {
-            clips: db.load_all()?,
+            clips: db.load_without_image_data()?,
             db,
             ttl: Some(DEFAULT_TTL),
         };
