@@ -44,3 +44,4 @@ check:
     cargo fmt --all --check
     just lint
     just test
+    ! grep -rn innerHTML app/ui

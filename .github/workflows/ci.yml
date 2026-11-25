@@ -17,14 +17,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      # With no arguments this installs what rust-toolchain.toml asks for
-      - run: rustup toolchain install
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # On its own, so the app's dependencies cannot enable features the core forgot to declare
       - run: cargo clippy -p packrat-core --all-targets -- -D warnings
       - run: cargo test --workspace
-      # Fails when a dependency's license is not in about.toml
+      - name: Clip text never goes through innerHTML
+        run: "! grep -rn innerHTML app/ui"
       - run: cargo install cargo-about --version "^0.9" --features cli --locked
-      - run: cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o "$RUNNER_TEMP/licenses.txt" about.hbs
+      - name: Check dependency licenses
+        run: cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o "$RUNNER_TEMP/licenses.txt" about.hbs
