@@ -1,4 +1,8 @@
-use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+use std::error::Error;
+
+use objc2::rc::Retained;
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSWindow, NSWindowCollectionBehavior};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
 use crate::focus;
@@ -7,12 +11,14 @@ pub const LABEL: &str = "main";
 
 const SHOWN: &str = "popup-shown";
 
-pub fn follow_active_space(window: &WebviewWindow) -> tauri::Result<()> {
-    let ns_window = window.ns_window()?.cast::<NSWindow>();
-    // SAFETY: Tauri returns a valid NSWindow that outlives this call, and
-    // setup runs on the main thread.
-    #[allow(unsafe_code)]
-    let ns_window = unsafe { &*ns_window };
+pub fn follow_active_space(window: &WebviewWindow) -> Result<(), Box<dyn Error>> {
+    let mtm = MainThreadMarker::new().ok_or("the popup must be set up on the main thread")?;
+    let target = window.ns_window()?.cast::<NSWindow>().cast_const();
+    let ns_window = NSApplication::sharedApplication(mtm)
+        .windows()
+        .iter()
+        .find(|candidate| Retained::as_ptr(candidate) == target)
+        .ok_or("the popup's NSWindow is not one of the app's windows")?;
     ns_window.setCollectionBehavior(
         ns_window.collectionBehavior()
             | NSWindowCollectionBehavior::MoveToActiveSpace

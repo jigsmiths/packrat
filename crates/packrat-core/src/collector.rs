@@ -35,6 +35,10 @@ impl Collector {
         self.paused
     }
 
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "a setter for a stored flag"
+    )]
     pub fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
     }

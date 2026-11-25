@@ -129,11 +129,19 @@ fn apply(app: &AppHandle, wanted: Settings) -> Option<String> {
     if previous != Some(wanted.hotkey) {
         let shortcuts = app.global_shortcut();
         if let Some(previous) = previous {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the new hotkey's registration is what gets reported"
+            )]
             let _ = shortcuts.unregister(previous);
         }
         if let Err(err) = shortcuts.register(wanted.hotkey) {
             problem = Some(format!("hotkey {} is unavailable ({err})", wanted.hotkey));
             if let Some(previous) = previous {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best effort, the problem with the new hotkey is already reported"
+                )]
                 let _ = shortcuts.register(previous);
                 effective.hotkey = previous;
             }

@@ -115,6 +115,10 @@ fn main() {
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
                         let handle = app.clone();
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "fails only when the event loop has stopped, as the app quits"
+                        )]
                         let _ = app.run_on_main_thread(move || popup::toggle(&handle));
                     }
                 })

@@ -35,6 +35,10 @@ mod tests {
     #[ignore = "writes to the login Keychain, run by hand with --ignored"]
     fn key_round_trip() {
         let service = "com.jigsmiths.packrat.test";
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "clears a key left by an earlier run, which may not exist"
+        )]
         let _ = delete_generic_password(service, ACCOUNT);
 
         assert_eq!(load_key(service).unwrap(), None);
