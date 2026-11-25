@@ -13,6 +13,10 @@ enum KeyPlan {
     Missing,
 }
 
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "a fact about the disk, matched in full against the stored key"
+)]
 fn plan_key(stored: Option<Key>, db_exists: bool) -> KeyPlan {
     match (stored, db_exists) {
         (Some(key), _) => KeyPlan::Use(key),

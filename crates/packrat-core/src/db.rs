@@ -182,6 +182,10 @@ impl Db {
         found(changed)
     }
 
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "a setter for a stored flag"
+    )]
     pub fn set_pinned(&self, hash: &str, pinned: bool) -> Result<()> {
         let changed = self.conn.execute(
             "UPDATE clips SET pinned = ?1 WHERE hash = ?2",
