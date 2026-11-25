@@ -1,5 +1,3 @@
-//! The clip list held in memory, kept in step with the database.
-
 use std::cmp::Reverse;
 use std::fmt::Write as _;
 use std::time::Duration;
@@ -10,14 +8,11 @@ use crate::db::{Clip, Db, Kind};
 use crate::pasteboard::Image;
 use crate::{Error, Result};
 
-/// How long unpinned clips are kept unless configured otherwise.
 pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// What `History::add` did with the content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Added {
     New,
-    /// The content was already known, so its clip moved to the top.
     Bumped,
 }
 
@@ -28,7 +23,6 @@ pub struct History {
 }
 
 impl History {
-    /// Loads every clip from `db`.
     pub fn open(db: Db) -> Result<Self> {
         let mut history = Self {
             clips: db.load_all()?,
@@ -39,22 +33,18 @@ impl History {
         Ok(history)
     }
 
-    /// Clips in display order: pinned first, then newest first.
     pub fn clips(&self) -> &[Clip] {
         &self.clips
     }
 
-    /// Bytes held across every clip.
     pub fn total_size(&self) -> usize {
         self.clips.iter().map(|clip| clip.size).sum()
     }
 
-    /// `None` disables expiry.
     pub fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
     }
 
-    /// Stores `content`, or bumps the existing clip when it is already known.
     pub fn add(&mut self, content: &str, now_ms: i64) -> Result<Added> {
         let hash = hash_content(content);
         if self.position(&hash).is_some() {
@@ -75,7 +65,6 @@ impl History {
         Ok(Added::New)
     }
 
-    /// Stores `image`, or bumps the existing clip when the same image is known.
     pub fn add_image(&mut self, image: &Image, now_ms: i64) -> Result<Added> {
         let hash = hash_bytes(&image.png);
         if self.position(&hash).is_some() {
@@ -96,12 +85,10 @@ impl History {
         Ok(Added::New)
     }
 
-    /// The PNG bytes of an image clip, read from disk.
     pub fn image_data(&self, hash: &str) -> Result<Vec<u8>> {
         self.db.load_data(hash)
     }
 
-    /// Moves a clip to the top of its group and restarts its TTL.
     pub fn touch(&mut self, hash: &str, now_ms: i64) -> Result<()> {
         let index = self.position(hash).ok_or(Error::NotFound)?;
         let result = self.db.set_created_at(hash, now_ms);
@@ -111,7 +98,6 @@ impl History {
         Ok(())
     }
 
-    /// Flips the pinned state and returns the new value.
     pub fn toggle_pin(&mut self, hash: &str) -> Result<bool> {
         let index = self.position(hash).ok_or(Error::NotFound)?;
         let pinned = !self.clips[index].pinned;
@@ -125,7 +111,6 @@ impl History {
     pub fn delete(&mut self, hash: &str) -> Result<()> {
         let index = self.position(hash).ok_or(Error::NotFound)?;
         match self.db.delete(hash) {
-            // Already gone from the database, which is the outcome we wanted.
             Ok(()) | Err(Error::NotFound) => {}
             Err(err) => return Err(err),
         }
@@ -133,7 +118,6 @@ impl History {
         Ok(())
     }
 
-    /// Removes unpinned clips older than the TTL and returns how many went.
     pub fn prune_expired(&mut self, now_ms: i64) -> Result<usize> {
         let Some(ttl) = self.ttl else {
             return Ok(0);
@@ -155,7 +139,6 @@ impl History {
             .sort_by_key(|clip| (!clip.pinned, Reverse(clip.created_at)));
     }
 
-    /// A clip that is in memory but not in the database is stale, so forget it.
     fn drop_if_missing(&mut self, index: usize, result: Result<()>) -> Result<()> {
         if matches!(result, Err(Error::NotFound)) {
             self.clips.remove(index);
@@ -164,12 +147,10 @@ impl History {
     }
 }
 
-/// Lowercase hex SHA-256 of `content`, the identity of a clip.
 pub fn hash_content(content: &str) -> String {
     hash_bytes(content.as_bytes())
 }
 
-/// Lowercase hex SHA-256 of `bytes`.
 pub fn hash_bytes(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(digest.len() * 2);
@@ -179,7 +160,6 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
     hex
 }
 
-/// The text shown and searched for an image clip.
 fn image_label(image: &Image) -> String {
     let size = format!("{}×{}", image.width, image.height);
     match &image.file_name {
@@ -188,8 +168,6 @@ fn image_label(image: &Image) -> String {
     }
 }
 
-/// Parses a TTL setting such as `24h` or `90m`. Empty means the default and
-/// `0` disables expiry.
 pub fn parse_ttl(value: &str) -> Result<Option<Duration>> {
     let value = value.trim();
     if value.is_empty() {
@@ -234,7 +212,6 @@ mod tests {
 
     #[test]
     fn hash_matches_sha256_hex() {
-        // Same value the Go app stored, so imported hashes stay valid.
         assert_eq!(
             hash_content("hello"),
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"

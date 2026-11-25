@@ -1,5 +1,3 @@
-//! Clipboard history storage, search and pasteboard access for Packrat.
-
 pub mod collector;
 pub mod db;
 pub mod history;
@@ -7,7 +5,6 @@ pub mod keychain;
 pub mod pasteboard;
 pub mod search;
 
-/// Errors returned by this crate.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("clip not found")]

@@ -1,15 +1,9 @@
-//! Fuzzy search over clips, scored the same way as clippy's matcher.
-
 use std::cmp::Reverse;
 
 use crate::db::Clip;
 
-// Texts shorter than this get a bonus, so a short exact hit beats a long one.
 const SHORT_TEXT_CHARS: usize = 50;
 
-/// Returns the clips whose content contains `query` as a case-insensitive
-/// subsequence, best match first. Ties keep the order of `clips`, and an empty
-/// query matches everything.
 pub fn search<'a>(clips: &'a [Clip], query: &str) -> Vec<&'a Clip> {
     let query: Vec<char> = query.chars().map(lower).collect();
     let mut matches: Vec<(usize, &Clip)> = clips
@@ -20,8 +14,6 @@ pub fn search<'a>(clips: &'a [Clip], query: &str) -> Vec<&'a Clip> {
     matches.into_iter().map(|(_, clip)| clip).collect()
 }
 
-/// Scores `text` against an already lowercased `query`, or `None` when the
-/// query is not a subsequence of it.
 fn score(text: &str, query: &[char]) -> Option<usize> {
     if query.is_empty() {
         return Some(0);
@@ -38,10 +30,8 @@ fn score(text: &str, query: &[char]) -> Option<usize> {
             break;
         }
         if lower(ch) == query[matched] {
-            // Earlier matches are worth more.
             total += len - index;
 
-            // A match at index 0 counts as continuing a run, as it does in clippy.
             let continues_run = match last_match {
                 Some(last) => index == last + 1,
                 None => index == 0,
@@ -110,7 +100,6 @@ mod tests {
 
     #[test]
     fn scores_match_clippy() {
-        // Reference values printed by a verbatim copy of clippy's fuzzyMatch.
         let cases = [
             ("test", "test", 217),
             ("testing", "test", 223),

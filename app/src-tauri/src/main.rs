@@ -18,16 +18,11 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_log::{Target, TargetKind};
 
-/// Shared between the capture thread, the tray and the popup.
 #[derive(Default)]
 pub struct AppState {
-    /// `None` while the history cannot be opened.
     history: Mutex<Option<History>>,
-    /// Why the history cannot be opened, shown in the tray menu.
     problem: Mutex<Option<String>>,
-    /// What is wrong with the config file or the hotkey, shown in the tray menu.
     settings_problem: Mutex<Option<String>>,
-    /// The settings in effect, `None` until the config is first read.
     settings: Mutex<Option<Settings>>,
     pub paused: AtomicBool,
 }
@@ -63,7 +58,6 @@ impl AppState {
             Ok(history) => (Some(history), None),
             Err(problem) => (None, Some(problem)),
         };
-        // A history opened after the config was read still needs its TTL.
         if let (Some(history), Some(settings)) = (history.as_mut(), self.settings()) {
             history.set_ttl(settings.ttl);
         }
@@ -122,7 +116,6 @@ fn main() {
             }
             tray::create(handle)?;
 
-            // Read once here so the hotkey works before the first poll.
             let mut config = config::Watcher::new(handle)?;
             config.poll(handle);
             capture::spawn(handle.clone(), config);
@@ -130,7 +123,6 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if window.label() == popup::LABEL && matches!(event, WindowEvent::Focused(false)) {
-                // The user moved focus themselves, so leave it where they put it.
                 popup::hide(window.app_handle(), false);
             }
         })

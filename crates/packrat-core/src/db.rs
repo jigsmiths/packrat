@@ -1,5 +1,3 @@
-//! Encrypted SQLite storage for clips.
-
 use std::fmt::Write as _;
 use std::fs::{DirBuilder, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -9,11 +7,8 @@ use rusqlite::{params, Connection, ErrorCode};
 
 use crate::{Error, Result};
 
-/// SQLCipher key for the database file.
 pub type Key = [u8; 32];
 
-// Startup VACUUM runs only when free pages are at least this share of the file
-// and at least this many pages, so normal startups skip the rewrite.
 const VACUUM_MIN_FREE_RATIO: f64 = 0.25;
 const VACUUM_MIN_FREE_PAGES: i64 = 256;
 
@@ -27,7 +22,6 @@ CREATE TABLE IF NOT EXISTS clips (
 CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at);
 ";
 
-// Each step moves the schema up one `user_version`.
 const MIGRATIONS: [&str; 1] = ["
 ALTER TABLE clips ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE clips ADD COLUMN data BLOB;
@@ -36,11 +30,9 @@ ALTER TABLE clips ADD COLUMN data BLOB;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Text = 0,
-    /// `content` is a label and the PNG bytes are in the `data` column.
     Image = 1,
 }
 
-/// One stored clipboard entry. `created_at` is Unix time in milliseconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clip {
     pub hash: String,
@@ -48,7 +40,6 @@ pub struct Clip {
     pub created_at: i64,
     pub pinned: bool,
     pub kind: Kind,
-    /// Bytes stored: the UTF-8 text, or the PNG for an image.
     pub size: usize,
 }
 
@@ -57,7 +48,6 @@ pub struct Db {
 }
 
 impl Db {
-    /// Opens the database at `path`, creating the file and its directory if needed.
     pub fn open(path: &Path, key: &Key) -> Result<Self> {
         if let Some(dir) = path.parent() {
             DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
@@ -82,7 +72,6 @@ impl Db {
 
         let db = Self { conn };
         db.migrate()?;
-        // Best effort: a failed vacuum must not block startup.
         let _ = db.vacuum_if_fragmented();
         Ok(db)
     }
@@ -117,7 +106,6 @@ impl Db {
         self.insert_with_data(clip, None)
     }
 
-    /// Stores an image clip with its PNG bytes.
     pub fn insert_image(&self, clip: &Clip, png: &[u8]) -> Result<()> {
         self.insert_with_data(clip, Some(png))
     }
@@ -138,7 +126,6 @@ impl Db {
         Ok(())
     }
 
-    /// Returns all clips, oldest first. Image bytes stay on disk, see `load_data`.
     pub fn load_all(&self) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(
             "SELECT hash, content, created_at, pinned, kind,
@@ -163,7 +150,6 @@ impl Db {
         Ok(clips)
     }
 
-    /// The PNG bytes of an image clip.
     pub fn load_data(&self, hash: &str) -> Result<Vec<u8>> {
         let data: Option<Vec<u8>> = self
             .conn
@@ -200,7 +186,6 @@ impl Db {
         found(changed)
     }
 
-    /// Deletes unpinned clips older than `cutoff` and returns how many were removed.
     pub fn delete_expired(&self, cutoff: i64) -> Result<usize> {
         Ok(self.conn.execute(
             "DELETE FROM clips WHERE pinned = 0 AND created_at < ?1",
@@ -374,7 +359,6 @@ mod tests {
         assert_eq!(db.load_all().unwrap(), vec![pinned]);
         assert_eq!(db.pragma_i64("user_version").unwrap(), 1);
 
-        // Opening again does not run the migration a second time.
         drop(db);
         Db::open(&path, &KEY).unwrap();
     }

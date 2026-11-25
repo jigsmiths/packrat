@@ -1,5 +1,3 @@
-//! Access to the macOS general pasteboard.
-
 use std::path::{Path, PathBuf};
 
 use objc2::rc::autoreleasepool;
@@ -9,7 +7,6 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSData, NSDictionary, NSString, NSURL};
 
-/// Larger images are not kept, so one copy cannot bloat the history.
 pub const MAX_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 
 // Types that password managers attach to secrets, see nspasteboard.org.
@@ -29,17 +26,14 @@ const IMAGE_EXTENSIONS: [&str; 10] = [
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
-/// An image as PNG bytes.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Image {
     pub png: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    /// Set when the user copied an image file rather than image data.
     pub file_name: Option<String>,
 }
 
-// Leaves out the bytes, which would flood test failures and logs.
 impl std::fmt::Debug for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Image")
@@ -51,24 +45,17 @@ impl std::fmt::Debug for Image {
     }
 }
 
-/// The pasteboard contents at one change count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
     pub change_count: isize,
-    /// `None` when the pasteboard holds no plain text.
     pub text: Option<String>,
-    /// A single copied image file, or image data when there is no text.
     pub image: Option<Image>,
-    /// A password manager marked the contents as secret.
     pub concealed: bool,
 }
 
 pub trait Pasteboard {
-    /// A counter that goes up every time the pasteboard contents change.
     fn change_count(&self) -> isize;
 
-    /// Reads types and text together. Returns `None` when the contents changed
-    /// during the read, because the text and the types may not belong together.
     fn snapshot(&self) -> Option<Snapshot>;
 }
 
@@ -94,7 +81,6 @@ impl Pasteboard for SystemPasteboard {
                 .map(|text| text.to_string());
             let concealed = is_concealed(&types);
             let has_file = types.iter().any(|name| name == FILE_URL_TYPE);
-            // Skipped for secrets, so their files are never read.
             let image = if concealed {
                 None
             } else if has_file {
@@ -116,7 +102,6 @@ impl Pasteboard for SystemPasteboard {
     }
 }
 
-/// The path of the copied file, when exactly one was copied.
 fn copied_file(pasteboard: &NSPasteboard) -> Option<PathBuf> {
     if pasteboard.pasteboardItems()?.count() != 1 {
         return None;
@@ -157,7 +142,6 @@ fn image_data(pasteboard: &NSPasteboard) -> Option<Image> {
     to_png(data.to_vec())
 }
 
-/// Keeps PNG bytes as they are and converts any other image format.
 fn to_png(bytes: Vec<u8>) -> Option<Image> {
     if let Some((width, height)) = png_size(&bytes) {
         return Some(Image {
@@ -181,7 +165,6 @@ fn to_png(bytes: Vec<u8>) -> Option<Image> {
     })
 }
 
-/// Width and height from the PNG header, or `None` when `bytes` is not a PNG.
 fn png_size(bytes: &[u8]) -> Option<(usize, usize)> {
     let header = bytes.strip_prefix(PNG_SIGNATURE)?;
     if header.get(4..8)? != b"IHDR" {
@@ -201,7 +184,6 @@ fn is_image_file(path: &Path) -> bool {
 }
 
 impl SystemPasteboard {
-    /// Replaces the pasteboard contents with `text`.
     #[allow(unsafe_code)]
     pub fn write_text(&self, text: &str) -> bool {
         autoreleasepool(|_| {
@@ -213,7 +195,6 @@ impl SystemPasteboard {
         })
     }
 
-    /// Replaces the pasteboard contents with a PNG image.
     pub fn write_image(&self, png: &[u8]) -> bool {
         autoreleasepool(|_| {
             let pasteboard = NSPasteboard::generalPasteboard();
@@ -275,10 +256,8 @@ mod tests {
         ])));
     }
 
-    // A 1x1 transparent PNG.
     const TINY_PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89\0\0\0\nIDATx\x9cc\0\x01\0\0\x05\0\x01\r\n-\xb4\0\0\0\0IEND\xaeB`\x82";
 
-    /// A 2x1 24-bit BMP, a format that has to be converted.
     fn tiny_bmp() -> Vec<u8> {
         let mut bmp = Vec::new();
         bmp.extend_from_slice(b"BM");
@@ -296,7 +275,6 @@ mod tests {
         bmp.extend_from_slice(&2835u32.to_le_bytes());
         bmp.extend_from_slice(&0u32.to_le_bytes());
         bmp.extend_from_slice(&0u32.to_le_bytes());
-        // Two pixels, blue then red, padded to four bytes.
         bmp.extend_from_slice(&[255, 0, 0, 0, 0, 255, 0, 0]);
         bmp
     }

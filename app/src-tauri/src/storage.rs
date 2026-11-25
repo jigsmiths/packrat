@@ -1,5 +1,3 @@
-//! Opens the encrypted history for this app identity.
-
 use std::path::Path;
 
 use packrat_core::db::{Db, Key};
@@ -12,7 +10,6 @@ const DB_FILE: &str = "packrat.db";
 enum KeyPlan {
     Use(Key),
     Create,
-    /// A database exists but its key is gone. Making a new key would only hide that.
     Missing,
 }
 
@@ -24,8 +21,6 @@ fn plan_key(stored: Option<Key>, db_exists: bool) -> KeyPlan {
     }
 }
 
-/// Opens the history in `data_dir`. `service` names the Keychain entry.
-/// The error is a message fit to show in the tray menu.
 pub fn open(data_dir: &Path, service: &str) -> Result<History, String> {
     let path = data_dir.join(DB_FILE);
     let stored = keychain::load_key(service).map_err(|err| err.to_string())?;
@@ -44,7 +39,6 @@ pub fn open(data_dir: &Path, service: &str) -> Result<History, String> {
         })
 }
 
-/// Deletes the history file and starts again with a new key.
 pub fn reset(data_dir: &Path, service: &str) -> Result<History, String> {
     let path = data_dir.join(DB_FILE);
     match std::fs::remove_file(&path) {

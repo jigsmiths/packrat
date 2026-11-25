@@ -1,12 +1,9 @@
-//! Decides, one poll at a time, whether the pasteboard holds a clip worth keeping.
-
 use crate::history::{Added, History};
 use crate::pasteboard::{Pasteboard, MAX_IMAGE_BYTES};
 use crate::Result;
 
 const PRUNE_INTERVAL_MS: i64 = 60_000;
 
-/// What one poll changed in the history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Poll {
     pub added: Option<Added>,
@@ -26,8 +23,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    /// Whatever is on the pasteboard now counts as already seen, so a clip the
-    /// user deleted does not come back on the next launch.
     pub fn new(pasteboard: &impl Pasteboard) -> Self {
         Self {
             last_change_count: pasteboard.change_count(),
@@ -44,7 +39,6 @@ impl Collector {
         self.paused = paused;
     }
 
-    /// Expires old clips when due, then captures the pasteboard if it changed.
     pub fn poll(
         &mut self,
         pasteboard: &impl Pasteboard,
@@ -66,11 +60,9 @@ impl Collector {
             return Ok(poll);
         }
         if self.paused {
-            // Remember the count so this copy is not captured on resume.
             self.last_change_count = change_count;
             return Ok(poll);
         }
-        // Leaving the count untouched makes the next poll try again.
         let Some(snapshot) = pasteboard.snapshot() else {
             return Ok(poll);
         };
@@ -126,7 +118,6 @@ mod tests {
             self.concealed.set(false);
         }
 
-        /// Copies image data, or with `text` an image file and its name.
         fn copy_image(&self, image: Image, text: Option<&str>) {
             self.change_count.set(self.change_count.get() + 1);
             *self.text.borrow_mut() = text.map(str::to_owned);
@@ -231,7 +222,6 @@ mod tests {
         assert_eq!(poll.added, None);
         assert!(history.clips().is_empty());
 
-        // The secret stays skipped on later polls, and normal copies still work.
         collector.poll(&pasteboard, &mut history, 200).unwrap();
         assert!(history.clips().is_empty());
         pasteboard.copy("not a secret");
@@ -306,7 +296,6 @@ mod tests {
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert!(history.clips().is_empty());
 
-        // A copied file that is too big falls back to its name.
         pasteboard.copy_image(image(huge, Some("big.png")), Some("big.png"));
         collector.poll(&pasteboard, &mut history, 200).unwrap();
         assert_eq!(contents(&history), ["big.png"]);
@@ -378,7 +367,6 @@ mod tests {
         let mut collector = Collector::new(&pasteboard);
         history.add("old", 0).unwrap();
 
-        // The first poll always prunes, but nothing has expired yet.
         let start = 24 * HOUR;
         assert_eq!(
             collector
@@ -388,7 +376,6 @@ mod tests {
             0
         );
 
-        // Expired now, but the last prune was under a minute ago.
         let early = collector
             .poll(&pasteboard, &mut history, start + PRUNE_INTERVAL_MS - 1)
             .unwrap();

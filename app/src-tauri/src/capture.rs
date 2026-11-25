@@ -1,5 +1,3 @@
-//! Background thread that feeds the pasteboard into the history.
-
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -12,7 +10,6 @@ use crate::{config, AppState};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Emitted to the frontend whenever the history gains or loses clips.
 pub const HISTORY_CHANGED: &str = "history-changed";
 
 pub fn now_ms() -> i64 {
@@ -37,7 +34,6 @@ pub fn spawn(app: AppHandle, mut config: config::Watcher) {
             };
             match collector.poll(&pasteboard, history, now_ms()) {
                 Ok(poll) if poll.changed() => {
-                    // Never log clip content.
                     log::info!(
                         "history changed: added={:?} pruned={} clips={}",
                         poll.added,
