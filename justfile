@@ -44,9 +44,10 @@ fmt:
 check-licenses:
     cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o "$(mktemp)" about.hbs
 
-# Clip text never goes through innerHTML
+# Clip text never goes through innerHTML, and images load under the CSP
 check-ui:
     ! grep -rn innerHTML app/ui
+    scripts/check-ui-urls.sh
 
 # What CI runs
 check:
