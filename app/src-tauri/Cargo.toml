@@ -17,8 +17,9 @@ tauri-build = { version = "2", features = [] }
 core-graphics = "0.25"
 log = "0.4"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSWorkspace", "NSRunningApplication", "libc"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSWorkspace", "NSRunningApplication", "libc"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator"] }
 packrat-core = { path = "../../crates/packrat-core" }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = ["image-png", "tray-icon"] }

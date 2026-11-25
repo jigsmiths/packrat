@@ -13,10 +13,11 @@ workspace = true
 [dependencies]
 getrandom = "0.4"
 humantime = "2"
+image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
 log = "0.4"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSBitmapImageRep", "NSImageRep", "NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSEnumerator", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSEnumerator", "NSString", "NSURL"] }
 rusqlite = { version = "0.43", features = ["bundled-sqlcipher"] }
 security-framework = "3"
 sha2 = "0.11"

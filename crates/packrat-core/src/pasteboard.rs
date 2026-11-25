@@ -1,9 +1,10 @@
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
+use image::ImageFormat;
 use objc2::rc::autoreleasepool;
-use objc2::runtime::AnyObject;
-use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard};
-use objc2_foundation::{NSData, NSDictionary, NSString, NSURL};
+use objc2_app_kit::{NSBitmapImageRep, NSPasteboard};
+use objc2_foundation::{NSData, NSString, NSURL};
 
 pub const MAX_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 
@@ -160,16 +161,19 @@ fn to_png(bytes: Vec<u8>) -> Option<Image> {
             source: ImageSource::Data,
         });
     }
-    let rep = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(&bytes))?;
-    let properties = NSDictionary::<NSString, AnyObject>::new();
-    // SAFETY: an empty dictionary has no values of the wrong type.
-    #[expect(unsafe_code, reason = "objc2 marks this AppKit call unsafe")]
-    let png =
-        unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties) }?;
+    // AppKit decodes formats the image crate cannot, such as HEIC, and its PNG encoder is unsafe in objc2.
+    let tiff = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(&bytes))?
+        .TIFFRepresentation()?
+        .to_vec();
+    let decoded = image::load_from_memory_with_format(&tiff, ImageFormat::Tiff).ok()?;
+    let mut png = Vec::new();
+    decoded
+        .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+        .ok()?;
     Some(Image {
-        png: png.to_vec(),
-        width: usize::try_from(rep.pixelsWide()).ok()?,
-        height: usize::try_from(rep.pixelsHigh()).ok()?,
+        png,
+        width: usize::try_from(decoded.width()).ok()?,
+        height: usize::try_from(decoded.height()).ok()?,
         source: ImageSource::Data,
     })
 }
@@ -317,6 +321,13 @@ mod tests {
         let image = to_png(tiny_bmp()).unwrap();
         assert_eq!(png_size(&image.png), Some((2, 1)));
         assert_eq!((image.width, image.height), (2, 1));
+    }
+
+    #[test]
+    fn heic_is_converted_to_png() {
+        let image = to_png(include_bytes!("../testdata/tiny.heic").to_vec()).unwrap();
+        assert_eq!(png_size(&image.png), Some((4, 3)));
+        assert_eq!((image.width, image.height), (4, 3));
     }
 
     #[test]

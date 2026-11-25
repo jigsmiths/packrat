@@ -54,5 +54,4 @@ check:
     just lint
     just test
     just check-ui
-    scripts/check-unsafe-sites.sh
     just check-licenses

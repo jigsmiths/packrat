@@ -10,7 +10,7 @@ repository = "https://github.com/jigsmiths/packrat"
 publish = false
 
 [workspace.lints.rust]
-unsafe_code = "deny"
+unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 let_underscore_must_use = "deny"
