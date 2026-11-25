@@ -120,16 +120,16 @@ impl History {
         Ok(())
     }
 
-    /// Removes unpinned clips not used within the TTL and returns how many went.
     pub fn prune_expired(&mut self, now_ms: i64) -> Result<usize> {
         let Some(ttl) = self.ttl else {
             return Ok(0);
         };
-        let cutoff = now_ms.saturating_sub(i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX));
-        self.db.delete_expired(cutoff)?;
+        let last_used_before_ms =
+            now_ms.saturating_sub(i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX));
+        self.db.delete_expired(last_used_before_ms)?;
         let before = self.clips.len();
         self.clips
-            .retain(|clip| clip.pinned || clip.last_used_at >= cutoff);
+            .retain(|clip| clip.pinned || clip.last_used_at >= last_used_before_ms);
         Ok(before - self.clips.len())
     }
 
