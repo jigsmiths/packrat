@@ -215,7 +215,18 @@ fn is_concealed(types: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
     use super::*;
+
+    // AppKit aborts the test process when tests use the pasteboard at the same time.
+    static SYSTEM_PASTEBOARD: Mutex<()> = Mutex::new(());
+
+    fn lock_system_pasteboard() -> MutexGuard<'static, ()> {
+        SYSTEM_PASTEBOARD
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
 
     fn types(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
@@ -351,6 +362,7 @@ mod tests {
     #[test]
     #[ignore = "reads the real pasteboard, run by hand with --ignored"]
     fn system_snapshot_matches_the_change_count() {
+        let _lock = lock_system_pasteboard();
         let pasteboard = SystemPasteboard;
         let snapshot = pasteboard.snapshot().expect("pasteboard changed mid-read");
         assert_eq!(snapshot.change_count, pasteboard.change_count());
@@ -359,6 +371,7 @@ mod tests {
     #[test]
     #[ignore = "overwrites the real pasteboard, run by hand with --ignored"]
     fn system_write_is_visible_in_the_next_snapshot() {
+        let _lock = lock_system_pasteboard();
         let pasteboard = SystemPasteboard;
         let before = pasteboard.change_count();
         assert!(pasteboard.write_text("packrat pasteboard test"));
@@ -372,6 +385,7 @@ mod tests {
     #[test]
     #[ignore = "overwrites the real pasteboard, run by hand with --ignored"]
     fn system_image_write_is_visible_in_the_next_snapshot() {
+        let _lock = lock_system_pasteboard();
         let pasteboard = SystemPasteboard;
         assert!(pasteboard.write_image(TINY_PNG));
 
