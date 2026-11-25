@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use packrat_core::history::parse_ttl;
@@ -52,6 +52,14 @@ fn parse(text: &str) -> Result<Settings, String> {
     Ok(Settings { ttl, hotkey })
 }
 
+fn read(path: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(format!("could not read the file: {err}")),
+    }
+}
+
 pub struct Watcher {
     path: PathBuf,
     loaded: bool,
@@ -87,8 +95,7 @@ impl Watcher {
         self.loaded = true;
         self.modified = modified;
 
-        let text = std::fs::read_to_string(&self.path).unwrap_or_default();
-        let problem = match parse(&text) {
+        let problem = match read(&self.path).and_then(|text| parse(&text)) {
             Ok(settings) => apply(app, settings),
             Err(reason) => {
                 if first_load {
@@ -175,6 +182,18 @@ mod tests {
         let settings = parse("ttl = \"0\"").unwrap();
         assert_eq!(settings.ttl, None);
         assert_eq!(settings.hotkey, default_hotkey());
+    }
+
+    #[test]
+    fn missing_file_reads_as_empty() {
+        let path = std::env::temp_dir().join("packrat-test-no-such-config.toml");
+        assert_eq!(read(&path), Ok(String::new()));
+    }
+
+    #[test]
+    fn unreadable_file_is_an_error() {
+        let err = read(&std::env::temp_dir()).unwrap_err();
+        assert!(!err.is_empty());
     }
 
     #[test]
