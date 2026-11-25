@@ -5,7 +5,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use crate::db::{Clip, Db, Kind};
-use crate::pasteboard::Image;
+use crate::pasteboard::{Image, ImageSource};
 use crate::{Error, Result};
 
 pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -171,9 +171,9 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
 
 fn image_label(image: &Image) -> String {
     let size = format!("{}×{}", image.width, image.height);
-    match &image.file_name {
-        Some(name) => format!("{name} · {size}"),
-        None => format!("Image {size}"),
+    match &image.source {
+        ImageSource::File(name) => format!("{name} · {size}"),
+        ImageSource::Data => format!("Image {size}"),
     }
 }
 
@@ -414,22 +414,27 @@ mod tests {
         assert_eq!(history.prune_expired(61_000).unwrap(), 1);
     }
 
-    fn image(png: &[u8], file_name: Option<&str>) -> Image {
+    fn image(png: &[u8], source: ImageSource) -> Image {
         Image {
             png: png.to_vec(),
             width: 1200,
             height: 800,
-            file_name: file_name.map(str::to_owned),
+            source,
         }
     }
 
     #[test]
     fn add_image_stores_a_labelled_clip_and_its_bytes() {
         let (_dir, path, mut history) = open_temp();
-        let shot = image(b"png bytes", Some("Screenshot 2026-11-17 at 10.02.png"));
+        let shot = image(
+            b"png bytes",
+            ImageSource::File("Screenshot 2026-11-17 at 10.02.png".to_owned()),
+        );
         assert_eq!(history.add_image(&shot, 100).unwrap(), Added::New);
         assert_eq!(
-            history.add_image(&image(b"other", None), 200).unwrap(),
+            history
+                .add_image(&image(b"other", ImageSource::Data), 200)
+                .unwrap(),
             Added::New
         );
 
@@ -457,10 +462,14 @@ mod tests {
     #[test]
     fn adding_a_known_image_bumps_it() {
         let (_dir, _path, mut history) = open_temp();
-        history.add_image(&image(b"png", None), 100).unwrap();
+        history
+            .add_image(&image(b"png", ImageSource::Data), 100)
+            .unwrap();
         history.add("text", 200).unwrap();
         assert_eq!(
-            history.add_image(&image(b"png", None), 300).unwrap(),
+            history
+                .add_image(&image(b"png", ImageSource::Data), 300)
+                .unwrap(),
             Added::Bumped
         );
         assert_eq!(contents(&history), ["Image 1200×800", "text"]);
@@ -470,7 +479,9 @@ mod tests {
     fn sizes_count_text_and_image_bytes() {
         let (_dir, path, mut history) = open_temp();
         history.add("héllo", 100).unwrap();
-        history.add_image(&image(b"png bytes", None), 200).unwrap();
+        history
+            .add_image(&image(b"png bytes", ImageSource::Data), 200)
+            .unwrap();
         let sizes: Vec<_> = history.clips().iter().map(|c| c.size).collect();
         assert_eq!(sizes, [9, 6]);
         assert_eq!(history.total_size(), 15);

@@ -21,7 +21,7 @@ pub fn now_ms() -> i64 {
 pub fn spawn(app: AppHandle, mut config: config::Watcher) {
     thread::spawn(move || {
         let pasteboard = SystemPasteboard;
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
         loop {
             thread::sleep(POLL_INTERVAL);
             config.poll(&app);
