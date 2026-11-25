@@ -32,6 +32,7 @@ package version: licenses
 test:
     cargo test --workspace
 
+# The core is linted on its own too, so the app's dependencies cannot enable features it forgot to declare
 lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo clippy -p packrat-core --all-targets -- -D warnings
@@ -39,10 +40,19 @@ lint:
 fmt:
     cargo fmt --all
 
-# Same checks as CI
+# Fail on a dependency whose license about.toml does not accept
+check-licenses:
+    cargo about generate --locked --fail -m app/src-tauri/Cargo.toml -o "$(mktemp)" about.hbs
+
+# Clip text never goes through innerHTML
+check-ui:
+    ! grep -rn innerHTML app/ui
+
+# What CI runs
 check:
     cargo fmt --all --check
     just lint
     just test
-    ! grep -rn innerHTML app/ui
+    just check-ui
     scripts/check-unsafe-sites.sh
+    just check-licenses
