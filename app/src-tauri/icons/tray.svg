@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="56 84 400 400" width="44" height="44">
+  <defs>
+    <path id="head" d="M256 456 C234 456 148 362 130 282 C118 222 172 174 256 174 C340 174 394 222 382 282 C364 362 278 456 256 456 Z"/>
+  </defs>
+  <mask id="ear-gap">
+    <rect x="0" y="0" width="512" height="512" fill="#fff"/>
+    <use href="#head" fill="none" stroke="#000" stroke-width="36"/>
+    <circle cx="90" cy="150" r="22" fill="#000"/>
+  </mask>
+  <mask id="eyes">
+    <rect x="0" y="0" width="512" height="512" fill="#fff"/>
+    <circle cx="206" cy="290" r="24" fill="#000"/>
+    <circle cx="306" cy="290" r="24" fill="#000"/>
+  </mask>
+  <g fill="#000" mask="url(#ear-gap)">
+    <ellipse cx="146" cy="196" rx="62" ry="78" transform="rotate(-32 146 196)"/>
+    <ellipse cx="366" cy="196" rx="62" ry="78" transform="rotate(32 366 196)"/>
+  </g>
+  <use href="#head" fill="#000" mask="url(#eyes)"/>
+</svg>
