@@ -54,8 +54,8 @@ impl History {
         let clip = Clip {
             hash,
             content: content.to_owned(),
-            created_at: now_ms,
-            last_used_at: now_ms,
+            created_at_ms: now_ms,
+            last_used_at_ms: now_ms,
             pinned: false,
             kind: Kind::Text,
             size: content.len(),
@@ -75,8 +75,8 @@ impl History {
         let clip = Clip {
             hash,
             content: image_label(image),
-            created_at: now_ms,
-            last_used_at: now_ms,
+            created_at_ms: now_ms,
+            last_used_at_ms: now_ms,
             pinned: false,
             kind: Kind::Image,
             size: image.png.len(),
@@ -95,7 +95,7 @@ impl History {
         let index = self.position(hash).ok_or(Error::NotFound)?;
         let result = self.db.set_last_used_at(hash, now_ms);
         self.drop_if_missing(index, result)?;
-        self.clips[index].last_used_at = now_ms;
+        self.clips[index].last_used_at_ms = now_ms;
         self.sort();
         Ok(())
     }
@@ -129,7 +129,7 @@ impl History {
         self.db.delete_expired(last_used_before_ms)?;
         let before = self.clips.len();
         self.clips
-            .retain(|clip| clip.pinned || clip.last_used_at >= last_used_before_ms);
+            .retain(|clip| clip.pinned || clip.last_used_at_ms >= last_used_before_ms);
         Ok(before - self.clips.len())
     }
 
@@ -139,7 +139,7 @@ impl History {
 
     fn sort(&mut self) {
         self.clips
-            .sort_by_key(|clip| (!clip.pinned, Reverse(clip.last_used_at)));
+            .sort_by_key(|clip| (!clip.pinned, Reverse(clip.last_used_at_ms)));
     }
 
     fn drop_if_missing(&mut self, index: usize, result: Result<()>) -> Result<()> {
@@ -234,7 +234,7 @@ mod tests {
         let clip = &history.clips()[0];
         assert_eq!(clip.content, "one");
         assert_eq!(clip.hash, hash_content("one"));
-        assert_eq!(clip.created_at, 100);
+        assert_eq!(clip.created_at_ms, 100);
         assert!(!clip.pinned);
     }
 
@@ -253,7 +253,7 @@ mod tests {
         history.add("two", 200).unwrap();
         assert_eq!(history.add("one", 300).unwrap(), Added::Bumped);
         assert_eq!(contents(&history), ["one", "two"]);
-        assert_eq!(history.clips()[0].last_used_at, 300);
+        assert_eq!(history.clips()[0].last_used_at_ms, 300);
 
         drop(history);
         assert_eq!(contents(&open(&path)), ["one", "two"]);
@@ -302,12 +302,12 @@ mod tests {
         history.add("picked", 100).unwrap();
         history.touch(&hash_content("picked"), 300).unwrap();
         for clip in history.clips() {
-            assert_eq!(clip.created_at, 100, "{}", clip.content);
+            assert_eq!(clip.created_at_ms, 100, "{}", clip.content);
         }
 
         drop(history);
         for clip in open(&path).clips() {
-            assert_eq!(clip.created_at, 100, "{}", clip.content);
+            assert_eq!(clip.created_at_ms, 100, "{}", clip.content);
         }
     }
 

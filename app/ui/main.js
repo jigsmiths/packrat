@@ -70,8 +70,8 @@ function renderList() {
     summary.textContent = row.summary === "" ? "(blank)" : row.summary;
     const age = document.createElement("span");
     age.className = "age";
-    age.textContent = formatAge(row.created_at);
-    age.title = `added ${formatTime(row.created_at)}`;
+    age.textContent = formatAge(row.created_at_ms);
+    age.title = `added ${formatTime(row.created_at_ms)}`;
     item.replaceChildren(summary, age);
     item.classList.toggle("blank", row.summary === "");
     item.classList.toggle("pinned", row.pinned);
@@ -174,9 +174,9 @@ async function renderPreview() {
       text = shown.text;
     }
     if (row.pinned) parts.push("pinned");
-    parts.push(`added ${formatTime(row.created_at)}`);
-    if (row.last_used_at !== row.created_at) {
-      parts.push(`last used ${formatTime(row.last_used_at)}`);
+    parts.push(`added ${formatTime(row.created_at_ms)}`);
+    if (row.last_used_at_ms !== row.created_at_ms) {
+      parts.push(`last used ${formatTime(row.last_used_at_ms)}`);
     }
     if (truncated) parts.push("showing the first 100 KB");
     details = parts.join(" • ");

@@ -44,8 +44,8 @@ pub enum Kind {
 pub struct Clip {
     pub hash: String,
     pub content: String,
-    pub created_at: i64,
-    pub last_used_at: i64,
+    pub created_at_ms: i64,
+    pub last_used_at_ms: i64,
     pub pinned: bool,
     pub kind: Kind,
     pub size: usize,
@@ -125,8 +125,8 @@ impl Db {
             params![
                 clip.hash,
                 clip.content,
-                clip.created_at,
-                clip.last_used_at,
+                clip.created_at_ms,
+                clip.last_used_at_ms,
                 clip.pinned,
                 clip.kind as i64,
                 data
@@ -146,8 +146,8 @@ impl Db {
                 Ok(Clip {
                     hash: row.get(0)?,
                     content: row.get(1)?,
-                    created_at: row.get(2)?,
-                    last_used_at: row.get(3)?,
+                    created_at_ms: row.get(2)?,
+                    last_used_at_ms: row.get(3)?,
                     pinned: row.get(4)?,
                     kind: match row.get::<_, i64>(5)? {
                         1 => Kind::Image,
@@ -188,10 +188,10 @@ impl Db {
         found(changed)
     }
 
-    pub fn set_last_used_at(&self, hash: &str, last_used_at: i64) -> Result<()> {
+    pub fn set_last_used_at(&self, hash: &str, last_used_at_ms: i64) -> Result<()> {
         let changed = self.conn.execute(
             "UPDATE clips SET last_used_at = ?1 WHERE hash = ?2",
-            params![last_used_at, hash],
+            params![last_used_at_ms, hash],
         )?;
         found(changed)
     }
@@ -229,23 +229,23 @@ mod tests {
 
     const KEY: Key = [7; 32];
 
-    fn clip(hash: &str, content: &str, last_used_at: i64) -> Clip {
+    fn clip(hash: &str, content: &str, last_used_at_ms: i64) -> Clip {
         Clip {
             hash: hash.into(),
             content: content.into(),
-            created_at: 0,
-            last_used_at,
+            created_at_ms: 0,
+            last_used_at_ms,
             pinned: false,
             kind: Kind::Text,
             size: content.len(),
         }
     }
 
-    fn image(hash: &str, created_at: i64, size: usize) -> Clip {
+    fn image(hash: &str, last_used_at_ms: i64, size: usize) -> Clip {
         Clip {
             kind: Kind::Image,
             size,
-            ..clip(hash, "Image 1×1", created_at)
+            ..clip(hash, "Image 1×1", last_used_at_ms)
         }
     }
 
@@ -366,7 +366,7 @@ mod tests {
 
         let db = Db::open(&path, &KEY).unwrap();
         let mut pinned = clip("h1", "one", 1);
-        pinned.created_at = 1;
+        pinned.created_at_ms = 1;
         pinned.pinned = true;
         assert_eq!(db.load_all().unwrap(), vec![pinned]);
         assert_eq!(
@@ -441,18 +441,18 @@ mod tests {
     fn set_last_used_at_leaves_created_at_alone() {
         let (_dir, db) = open_temp();
         let mut added = clip("h1", "one", 1);
-        added.created_at = 1;
+        added.created_at_ms = 1;
         db.insert(&added).unwrap();
         db.set_last_used_at("h1", 99).unwrap();
         let loaded = &db.load_all().unwrap()[0];
-        assert_eq!((loaded.created_at, loaded.last_used_at), (1, 99));
+        assert_eq!((loaded.created_at_ms, loaded.last_used_at_ms), (1, 99));
     }
 
     #[test]
     fn delete_expired_goes_by_last_use() {
         let (_dir, db) = open_temp();
         let mut old_but_used = clip("h1", "one", 900);
-        old_but_used.created_at = 100;
+        old_but_used.created_at_ms = 100;
         db.insert(&old_but_used).unwrap();
         assert_eq!(db.delete_expired(500).unwrap(), 0);
     }
@@ -490,7 +490,7 @@ mod tests {
 
         let db = Db::open(&path, &KEY).unwrap();
         let loaded = &db.load_all().unwrap()[0];
-        assert_eq!((loaded.created_at, loaded.last_used_at), (123, 123));
+        assert_eq!((loaded.created_at_ms, loaded.last_used_at_ms), (123, 123));
         assert!(loaded.pinned);
     }
 
