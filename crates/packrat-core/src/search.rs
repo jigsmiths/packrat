@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 
 use crate::db::Clip;
 
-const SHORT_TEXT_CHARS: usize = 50;
+const SHORT_TEXT_BONUS_BELOW_CHARS: usize = 50;
 
 pub fn search<'a>(clips: &'a [Clip], query: &str) -> Vec<&'a Clip> {
     let query: Vec<char> = query.chars().map(lower).collect();
@@ -32,11 +32,7 @@ fn score(text: &str, query: &[char]) -> Option<usize> {
         if lower(ch) == query[matched] {
             total += len - index;
 
-            let continues_run = match last_match {
-                Some(last) => index == last + 1,
-                None => index == 0,
-            };
-            if continues_run {
+            if continues_run(last_match, index) {
                 run += 1;
                 total += run * 10;
             } else {
@@ -56,7 +52,14 @@ fn score(text: &str, query: &[char]) -> Option<usize> {
     if matched < query.len() {
         return None;
     }
-    Some(total + SHORT_TEXT_CHARS.saturating_sub(len) * 2)
+    Some(total + SHORT_TEXT_BONUS_BELOW_CHARS.saturating_sub(len) * 2)
+}
+
+fn continues_run(last_match: Option<usize>, index: usize) -> bool {
+    match last_match {
+        Some(last) => index == last + 1,
+        None => index == 0,
+    }
 }
 
 fn lower(ch: char) -> char {
