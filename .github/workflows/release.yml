@@ -156,6 +156,8 @@ jobs:
               run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Packrat.app"]
             end
 
+            uninstall quit: "com.jigsmiths.packrat"
+
             zap trash: [
               "~/Library/Application Support/com.jigsmiths.packrat",
               "~/Library/Logs/com.jigsmiths.packrat",
