@@ -7,7 +7,7 @@ use tauri::ipc::Response;
 use tauri::{AppHandle, State};
 
 use crate::capture::now_ms;
-use crate::{paste, popup, AppState};
+use crate::{paste, popup, AppState, HistoryState};
 
 const MAX_ROWS: usize = 500;
 const SUMMARY_CHARS: usize = 200;
@@ -43,13 +43,10 @@ fn with_history<T>(
     state: &AppState,
     action: impl FnOnce(&mut History) -> packrat_core::Result<T>,
 ) -> Result<T, String> {
-    let mut history = state.history();
-    match history.as_mut() {
-        Some(history) => action(history).map_err(|err| err.to_string()),
-        None => Err(state
-            .problem()
-            .clone()
-            .unwrap_or_else(|| "history is not open".to_owned())),
+    match &mut *state.history() {
+        HistoryState::Open(history) => action(history).map_err(|err| err.to_string()),
+        HistoryState::Failed(problem) => Err(problem.clone()),
+        HistoryState::NotOpened => Err("history is not open".to_owned()),
     }
 }
 

@@ -34,7 +34,7 @@ pub fn refresh(app: &AppHandle) {
         return;
     };
     let state = app.state::<AppState>();
-    let has_problem = state.problem().is_some() || state.settings_problem().is_some();
+    let has_problem = state.history().problem().is_some() || state.settings_problem().is_some();
     let tooltip = if has_problem {
         "Packrat: needs attention"
     } else if state.paused.load(Ordering::Relaxed) {
@@ -55,7 +55,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let state = app.state::<AppState>();
     let menu = Menu::new(app)?;
 
-    if let Some(problem) = state.problem().as_deref() {
+    // Copied out so the history stays unlocked while the menu is built.
+    let history_problem = state.history().problem().map(str::to_owned);
+    if let Some(problem) = history_problem {
         let label = format!("Not capturing: {problem}");
         menu.append(&MenuItem::new(app, label, false, None::<&str>)?)?;
         menu.append(&MenuItem::with_id(

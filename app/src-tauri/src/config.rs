@@ -6,7 +6,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
-use crate::{tray, AppState};
+use crate::{tray, AppState, SettingsState};
 
 const FILE_NAME: &str = "config.toml";
 
@@ -66,19 +66,22 @@ pub struct Watcher {
     modified: Option<SystemTime>,
 }
 
+pub fn write_default_if_missing(app: &AppHandle) -> tauri::Result<()> {
+    let dir = app.path().app_config_dir()?;
+    let path = dir.join(FILE_NAME);
+    if !path.exists() {
+        let written = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, TEMPLATE));
+        if let Err(err) = written {
+            log::warn!("could not write the default config: {err}");
+        }
+    }
+    Ok(())
+}
+
 impl Watcher {
     pub fn new(app: &AppHandle) -> tauri::Result<Self> {
-        let dir = app.path().app_config_dir()?;
-        let path = dir.join(FILE_NAME);
-        if !path.exists() {
-            let written =
-                std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, TEMPLATE));
-            if let Err(err) = written {
-                log::warn!("could not write the default config: {err}");
-            }
-        }
         Ok(Self {
-            path,
+            path: app.path().app_config_dir()?.join(FILE_NAME),
             loaded: false,
             modified: None,
         })
@@ -116,7 +119,10 @@ impl Watcher {
 
 fn apply(app: &AppHandle, wanted: Settings) -> Option<String> {
     let state = app.state::<AppState>();
-    let previous = state.settings().map(|settings| settings.hotkey);
+    let previous = match state.settings() {
+        SettingsState::Loaded(settings) => Some(settings.hotkey),
+        SettingsState::Loading => None,
+    };
     let mut effective = wanted;
     let mut problem = None;
 
