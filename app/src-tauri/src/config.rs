@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use packrat_core::history::parse_ttl;
+use packrat_core::history::{parse_ttl, Expiry};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -38,7 +38,7 @@ impl Default for ConfigFile {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Settings {
-    pub ttl: Option<Duration>,
+    pub ttl: Expiry,
     pub hotkey: Shortcut,
 }
 
@@ -145,6 +145,8 @@ fn apply(app: &AppHandle, wanted: Settings) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use tauri_plugin_global_shortcut::{Code, Modifiers};
 
     use super::*;
@@ -158,7 +160,7 @@ mod tests {
     #[test]
     fn empty_file_gives_the_defaults() {
         let settings = parse("").unwrap();
-        assert_eq!(settings.ttl, Some(DAY));
+        assert_eq!(settings.ttl, Expiry::After(DAY));
         assert_eq!(settings.hotkey, default_hotkey());
     }
 
@@ -170,7 +172,7 @@ mod tests {
     #[test]
     fn values_are_read_from_the_file() {
         let settings = parse("ttl = \"90m\"\nhotkey = \"Ctrl+Alt+Space\"").unwrap();
-        assert_eq!(settings.ttl, Some(Duration::from_secs(90 * 60)));
+        assert_eq!(settings.ttl, Expiry::After(Duration::from_secs(90 * 60)));
         assert_eq!(
             settings.hotkey,
             Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space)
@@ -180,7 +182,7 @@ mod tests {
     #[test]
     fn one_setting_can_be_given_alone() {
         let settings = parse("ttl = \"0\"").unwrap();
-        assert_eq!(settings.ttl, None);
+        assert_eq!(settings.ttl, Expiry::Never);
         assert_eq!(settings.hotkey, default_hotkey());
     }
 

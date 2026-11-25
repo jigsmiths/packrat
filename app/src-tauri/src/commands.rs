@@ -150,7 +150,7 @@ pub fn copy_clip(
             Kind::Text => Payload::Text(content),
             Kind::Image => Payload::Image(history.image_data(&hash)?),
         };
-        history.touch(&hash, now_ms())?;
+        history.bump(&hash, now_ms())?;
         Ok(payload)
     })?;
     let written = match &payload {

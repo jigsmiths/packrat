@@ -16,10 +16,16 @@ pub enum Added {
     Bumped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expiry {
+    Never,
+    After(Duration),
+}
+
 pub struct History {
     db: Db,
     clips: Vec<Clip>,
-    ttl: Option<Duration>,
+    ttl: Expiry,
 }
 
 impl History {
@@ -27,7 +33,7 @@ impl History {
         let mut history = Self {
             clips: db.load_without_image_data()?,
             db,
-            ttl: Some(DEFAULT_TTL),
+            ttl: Expiry::After(DEFAULT_TTL),
         };
         history.sort();
         Ok(history)
@@ -41,14 +47,14 @@ impl History {
         self.clips.iter().map(|clip| clip.size).sum()
     }
 
-    pub fn set_ttl(&mut self, ttl: Option<Duration>) {
+    pub fn set_ttl(&mut self, ttl: Expiry) {
         self.ttl = ttl;
     }
 
     pub fn add(&mut self, content: &str, now_ms: i64) -> Result<Added> {
         let hash = hash_content(content);
         if self.position(&hash).is_some() {
-            self.touch(&hash, now_ms)?;
+            self.bump(&hash, now_ms)?;
             return Ok(Added::Bumped);
         }
         let clip = Clip {
@@ -69,7 +75,7 @@ impl History {
     pub fn add_image(&mut self, image: &Image, now_ms: i64) -> Result<Added> {
         let hash = hash_bytes(&image.png);
         if self.position(&hash).is_some() {
-            self.touch(&hash, now_ms)?;
+            self.bump(&hash, now_ms)?;
             return Ok(Added::Bumped);
         }
         let clip = Clip {
@@ -91,9 +97,9 @@ impl History {
         self.db.load_data(hash)
     }
 
-    pub fn touch(&mut self, hash: &str, now_ms: i64) -> Result<()> {
+    pub fn bump(&mut self, hash: &str, now_ms: i64) -> Result<()> {
         let index = self.position(hash).ok_or(Error::NotFound)?;
-        let result = self.db.set_last_used_at(hash, now_ms);
+        let result = self.db.set_last_used_at_ms(hash, now_ms);
         self.drop_if_missing(index, result)?;
         self.clips[index].last_used_at_ms = now_ms;
         self.sort();
@@ -121,7 +127,7 @@ impl History {
     }
 
     pub fn prune_expired(&mut self, now_ms: i64) -> Result<usize> {
-        let Some(ttl) = self.ttl else {
+        let Expiry::After(ttl) = self.ttl else {
             return Ok(0);
         };
         let last_used_before_ms =
@@ -171,19 +177,22 @@ fn image_label(image: &Image) -> String {
     }
 }
 
-pub fn parse_ttl(value: &str) -> Result<Option<Duration>> {
+pub fn parse_ttl(value: &str) -> Result<Expiry> {
     let value = value.trim();
     if value.is_empty() {
-        return Ok(Some(DEFAULT_TTL));
+        return Ok(Expiry::After(DEFAULT_TTL));
     }
     if value == "0" {
-        return Ok(None);
+        return Ok(Expiry::Never);
     }
     let ttl = humantime::parse_duration(value).map_err(|err| Error::InvalidTtl {
         value: value.to_owned(),
         reason: err.to_string(),
     })?;
-    Ok((!ttl.is_zero()).then_some(ttl))
+    if ttl.is_zero() {
+        return Ok(Expiry::Never);
+    }
+    Ok(Expiry::After(ttl))
 }
 
 #[cfg(test)]
@@ -286,11 +295,11 @@ mod tests {
     }
 
     #[test]
-    fn touch_moves_a_clip_to_the_top() {
+    fn bump_moves_a_clip_to_the_top() {
         let (_dir, _path, mut history) = open_temp();
         history.add("one", 100).unwrap();
         history.add("two", 200).unwrap();
-        history.touch(&hash_content("one"), 300).unwrap();
+        history.bump(&hash_content("one"), 300).unwrap();
         assert_eq!(contents(&history), ["one", "two"]);
     }
 
@@ -300,7 +309,7 @@ mod tests {
         history.add("copied twice", 100).unwrap();
         history.add("copied twice", 200).unwrap();
         history.add("picked", 100).unwrap();
-        history.touch(&hash_content("picked"), 300).unwrap();
+        history.bump(&hash_content("picked"), 300).unwrap();
         for clip in history.clips() {
             assert_eq!(clip.created_at_ms, 100, "{}", clip.content);
         }
@@ -336,23 +345,23 @@ mod tests {
         let (_dir, _path, mut history) = open_temp();
         assert!(matches!(history.delete("nope"), Err(Error::NotFound)));
         assert!(matches!(history.toggle_pin("nope"), Err(Error::NotFound)));
-        assert!(matches!(history.touch("nope", 1), Err(Error::NotFound)));
+        assert!(matches!(history.bump("nope", 1), Err(Error::NotFound)));
     }
 
     #[test]
     fn clip_missing_from_the_database_is_dropped() {
         let (_dir, _path, mut history) = open_temp();
         history.add("pin me", 100).unwrap();
-        history.add("touch me", 200).unwrap();
+        history.add("bump me", 200).unwrap();
         history.add("delete me", 300).unwrap();
-        for content in ["pin me", "touch me", "delete me"] {
+        for content in ["pin me", "bump me", "delete me"] {
             history.db.delete(&hash_content(content)).unwrap();
         }
 
         let pin = history.toggle_pin(&hash_content("pin me"));
         assert!(matches!(pin, Err(Error::NotFound)));
-        let touch = history.touch(&hash_content("touch me"), 400);
-        assert!(matches!(touch, Err(Error::NotFound)));
+        let bump = history.bump(&hash_content("bump me"), 400);
+        assert!(matches!(bump, Err(Error::NotFound)));
         history.delete(&hash_content("delete me")).unwrap();
         assert!(history.clips().is_empty());
     }
@@ -391,7 +400,7 @@ mod tests {
     #[test]
     fn prune_does_nothing_when_expiry_is_off() {
         let (_dir, _path, mut history) = open_temp();
-        history.set_ttl(None);
+        history.set_ttl(Expiry::Never);
         history.add("ancient", 0).unwrap();
         assert_eq!(history.prune_expired(1000 * HOUR).unwrap(), 0);
         assert_eq!(contents(&history), ["ancient"]);
@@ -400,7 +409,7 @@ mod tests {
     #[test]
     fn prune_uses_a_custom_ttl() {
         let (_dir, _path, mut history) = open_temp();
-        history.set_ttl(Some(Duration::from_secs(60)));
+        history.set_ttl(Expiry::After(Duration::from_secs(60)));
         history.add("short lived", 0).unwrap();
         assert_eq!(history.prune_expired(61_000).unwrap(), 1);
     }
@@ -482,19 +491,19 @@ mod tests {
 
     #[test]
     fn parse_ttl_accepts_durations() {
-        assert_eq!(parse_ttl("").unwrap(), Some(DEFAULT_TTL));
-        assert_eq!(parse_ttl("  ").unwrap(), Some(DEFAULT_TTL));
-        assert_eq!(parse_ttl("24h").unwrap(), Some(DEFAULT_TTL));
+        assert_eq!(parse_ttl("").unwrap(), Expiry::After(DEFAULT_TTL));
+        assert_eq!(parse_ttl("  ").unwrap(), Expiry::After(DEFAULT_TTL));
+        assert_eq!(parse_ttl("24h").unwrap(), Expiry::After(DEFAULT_TTL));
         assert_eq!(
             parse_ttl("90m").unwrap(),
-            Some(Duration::from_secs(90 * 60))
+            Expiry::After(Duration::from_secs(90 * 60))
         );
         assert_eq!(
             parse_ttl("1h30m").unwrap(),
-            Some(Duration::from_secs(90 * 60))
+            Expiry::After(Duration::from_secs(90 * 60))
         );
-        assert_eq!(parse_ttl("0").unwrap(), None);
-        assert_eq!(parse_ttl("0s").unwrap(), None);
+        assert_eq!(parse_ttl("0").unwrap(), Expiry::Never);
+        assert_eq!(parse_ttl("0s").unwrap(), Expiry::Never);
     }
 
     #[test]
