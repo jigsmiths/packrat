@@ -1,5 +1,3 @@
-//! The database key, stored as a generic password in the login Keychain.
-
 use security_framework::passwords::{get_generic_password, set_generic_password};
 
 use crate::db::Key;
@@ -8,7 +6,6 @@ use crate::{Error, Result};
 const ACCOUNT: &str = "db-key";
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
-/// Returns the stored key, or `None` when there is none yet.
 pub fn load_key(service: &str) -> Result<Option<Key>> {
     match get_generic_password(service, ACCOUNT) {
         Ok(bytes) => {
@@ -21,7 +18,6 @@ pub fn load_key(service: &str) -> Result<Option<Key>> {
     }
 }
 
-/// Generates a random key and stores it, replacing any existing one.
 pub fn create_key(service: &str) -> Result<Key> {
     let mut key = Key::default();
     getrandom::fill(&mut key)?;

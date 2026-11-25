@@ -1,8 +1,5 @@
 "use strict";
 
-// Clip content is untrusted text. It is only ever assigned to textContent,
-// never to innerHTML, so nothing a user copies can run in this page.
-
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
@@ -20,17 +17,13 @@ const PASTE_HINT = `Enter paste • ⌘↩ copy • ${OTHER_KEYS}`;
 const COPY_HINT = `Enter copy • ${OTHER_KEYS}`;
 const CONFIRM_HINT = "Delete this pinned clip? ⌘⌫ again to confirm, Esc to cancel";
 
-// The last answer from list_clips, or null when it failed.
 let listing = null;
 let failure = null;
 let selectedHash = null;
-// Hash of a pinned clip waiting for a second Cmd+Backspace.
 let pendingDelete = null;
-// Whether macOS lets Packrat send the paste keystroke. Asked each time the popup opens.
 let canPaste = false;
 let listRequest = 0;
 let previewRequest = 0;
-// Object URL of the image in the preview, revoked when it is replaced.
 let imageUrl = null;
 
 function rows() {
@@ -54,7 +47,6 @@ async function refresh() {
   } catch (err) {
     error = String(err);
   }
-  // A newer keystroke already asked again, so this answer is stale.
   if (request !== listRequest) return;
 
   listing = answer;
@@ -154,7 +146,6 @@ async function renderPreview() {
       if (shown.truncated) parts.push("showing the first 100 KB");
       text = shown.text;
     }
-    // After the size, before the truncation note.
     if (row.pinned) parts.splice(row.image ? 1 : 2, 0, "pinned");
     details = parts.join(" • ");
   } catch (err) {
@@ -225,7 +216,6 @@ async function deleteSelected() {
     renderStatus();
     return;
   }
-  // Keep the cursor in place by moving it to the neighbor before the row goes.
   const index = selectedIndex();
   const neighbor = rows()[index + 1] ?? rows()[index - 1] ?? null;
   try {
@@ -262,7 +252,6 @@ window.addEventListener("keydown", (event) => {
   } else if (event.key === "ArrowUp" || (control && event.key === "p")) {
     move(-1);
   } else if (event.key === "Enter") {
-    // Cmd+Enter copies without pasting.
     copySelected(!event.metaKey);
   } else if (command && event.key === "p") {
     togglePin();

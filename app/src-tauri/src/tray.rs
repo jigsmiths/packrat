@@ -1,5 +1,3 @@
-//! The menu bar icon and its menu.
-
 use std::sync::atomic::Ordering;
 
 use tauri::image::Image;
@@ -31,7 +29,6 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Rebuilds the menu and the icon's label from the current state.
 pub fn refresh(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -115,7 +112,6 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     Ok(menu)
 }
 
-/// Dev builds stay out of the login items, so they never start beside the real app.
 fn offers_launch_at_login(app: &AppHandle) -> bool {
     !app.config().identifier.ends_with(".dev")
 }
@@ -132,7 +128,6 @@ fn toggle_launch_at_login(app: &AppHandle) {
         Ok(()) => log::info!("launch at login={enable}"),
         Err(err) => log::error!("could not change launch at login: {err}"),
     }
-    // Rebuild so the checkbox shows what macOS now has, even after a failure.
     refresh(app);
 }
 

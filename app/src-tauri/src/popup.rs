@@ -1,5 +1,3 @@
-//! Showing and hiding the popup window.
-
 use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
@@ -7,10 +5,8 @@ use crate::focus;
 
 pub const LABEL: &str = "main";
 
-/// Emitted to the frontend each time the popup appears.
 const SHOWN: &str = "popup-shown";
 
-/// Lets the popup follow the user to the active Space and sit over full-screen apps.
 pub fn prepare(window: &WebviewWindow) -> tauri::Result<()> {
     let ns_window = window.ns_window()?.cast::<NSWindow>();
     // SAFETY: Tauri returns a valid NSWindow that outlives this call, and
@@ -39,10 +35,7 @@ pub fn show(app: &AppHandle) {
     }
 }
 
-/// Hides the popup. `restore_focus` returns the user to the app they came
-/// from, and should be false when they moved focus somewhere themselves.
 pub fn hide(app: &AppHandle, restore_focus: bool) {
-    // Taken first: hiding fires a blur event, which lands back here.
     let previous = focus::take();
     if let Some(window) = app.get_webview_window(LABEL) {
         if let Err(err) = window.hide() {
@@ -68,7 +61,6 @@ pub fn toggle(app: &AppHandle) {
     }
 }
 
-/// Centers horizontally and sits a third of the way down, like Spotlight.
 fn place_on_cursor_screen(window: &WebviewWindow) -> tauri::Result<()> {
     let cursor = window.cursor_position()?;
     let Some(monitor) = window.monitor_from_point(cursor.x, cursor.y)? else {

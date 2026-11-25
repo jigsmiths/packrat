@@ -1,5 +1,3 @@
-//! Commands the popup calls.
-
 use packrat_core::db::Kind;
 use packrat_core::history::History;
 use packrat_core::pasteboard::SystemPasteboard;
@@ -13,7 +11,6 @@ use crate::{paste, popup, AppState};
 
 const MAX_ROWS: usize = 500;
 const SUMMARY_CHARS: usize = 200;
-// Larger clips are cut in the preview so the webview stays responsive.
 const PREVIEW_BYTES: usize = 100 * 1024;
 
 #[derive(Serialize)]
@@ -28,10 +25,8 @@ pub struct Row {
 #[derive(Serialize)]
 pub struct Listing {
     rows: Vec<Row>,
-    /// Matches before the row limit was applied.
     matched: usize,
     total: usize,
-    /// Bytes held across the whole history, not just the matches.
     total_size: usize,
 }
 
@@ -56,7 +51,6 @@ fn with_history<T>(
     }
 }
 
-/// One line of at most `SUMMARY_CHARS` characters, with whitespace collapsed.
 fn summarize(content: &str) -> String {
     let mut summary = String::new();
     let mut chars = 0;
@@ -124,7 +118,6 @@ pub fn preview_clip(state: State<AppState>, hash: String) -> Result<Preview, Str
     })
 }
 
-/// The PNG bytes of an image clip, sent raw rather than as JSON.
 #[tauri::command]
 pub fn image_clip(state: State<AppState>, hash: String) -> Result<Response, String> {
     with_history(&state, |history| history.image_data(&hash)).map(Response::new)
@@ -135,9 +128,6 @@ enum Payload {
     Image(Vec<u8>),
 }
 
-/// Puts the clip on the pasteboard, moves it to the top and hides the popup.
-/// With `paste` it then pastes into the app the user came from. Returns
-/// whether it pasted, which needs the Accessibility permission.
 #[tauri::command]
 pub fn copy_clip(
     app: AppHandle,
@@ -199,7 +189,6 @@ pub fn delete_clip(state: State<AppState>, hash: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Enough of a hash to follow one clip through the log, which never holds content.
 fn short(hash: &str) -> &str {
     hash.get(..8).unwrap_or(hash)
 }
@@ -243,7 +232,6 @@ mod tests {
 
     #[test]
     fn long_clips_are_cut_on_a_character_boundary() {
-        // Two-byte characters, offset by one so the limit falls inside a character.
         let content = format!("a{}", "é".repeat(PREVIEW_BYTES));
         let shown = preview(&content);
         assert!(shown.truncated);

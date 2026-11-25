@@ -1,5 +1,3 @@
-//! The About window, opened from the tray menu.
-
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
@@ -13,10 +11,8 @@ const LABEL: &str = "about";
 const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 const COPYRIGHT: &str = "Copyright (c) 2026 jigsmiths";
 const LICENSE: &str = concat!(env!("CARGO_PKG_LICENSE"), " License");
-// Bundled only by release builds, see tauri.bundle.conf.json.
 const LICENSES_FILE: &str = "THIRD-PARTY-LICENSES.txt";
 
-/// What the About window can open. The page names a link, never a URL or path.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Link {
@@ -40,7 +36,6 @@ impl Places {
     }
 }
 
-/// What `open` should be given for a link, if it is there to open.
 fn resolve(link: Link, places: &Places) -> Option<OsString> {
     let path = match link {
         Link::Repo => return Some(REPO.into()),

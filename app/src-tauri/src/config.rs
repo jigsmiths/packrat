@@ -1,5 +1,3 @@
-//! Settings from `config.toml`, applied again whenever the file changes.
-
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -40,7 +38,6 @@ impl Default for ConfigFile {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Settings {
-    /// `None` keeps unpinned clips forever.
     pub ttl: Option<Duration>,
     pub hotkey: Shortcut,
 }
@@ -55,7 +52,6 @@ fn parse(text: &str) -> Result<Settings, String> {
     Ok(Settings { ttl, hotkey })
 }
 
-/// Notices edits to the config file by its modification time.
 pub struct Watcher {
     path: PathBuf,
     loaded: bool,
@@ -63,7 +59,6 @@ pub struct Watcher {
 }
 
 impl Watcher {
-    /// Writes a commented default file on first run.
     pub fn new(app: &AppHandle) -> tauri::Result<Self> {
         let dir = app.path().app_config_dir()?;
         let path = dir.join(FILE_NAME);
@@ -81,7 +76,6 @@ impl Watcher {
         })
     }
 
-    /// Reads and applies the file if it changed since the last call.
     pub fn poll(&mut self, app: &AppHandle) {
         let modified = std::fs::metadata(&self.path)
             .and_then(|meta| meta.modified())
@@ -93,7 +87,6 @@ impl Watcher {
         self.loaded = true;
         self.modified = modified;
 
-        // A missing file means defaults.
         let text = std::fs::read_to_string(&self.path).unwrap_or_default();
         let problem = match parse(&text) {
             Ok(settings) => apply(app, settings),
@@ -114,8 +107,6 @@ impl Watcher {
     }
 }
 
-/// Applies `wanted` and returns what went wrong, if anything. A hotkey that
-/// cannot be registered leaves the previous one in place.
 fn apply(app: &AppHandle, wanted: Settings) -> Option<String> {
     let state = app.state::<AppState>();
     let previous = state.settings().map(|settings| settings.hotkey);

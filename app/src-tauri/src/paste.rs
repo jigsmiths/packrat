@@ -1,12 +1,9 @@
-//! Pastes into the frontmost app by sending Cmd+V.
-
 use std::thread;
 use std::time::Duration;
 
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-// Time for the previous app to become frontmost again before the keystroke.
 const DELAY: Duration = Duration::from_millis(80);
 const KEY_V: u16 = 9;
 const ACCESSIBILITY_SETTINGS: &str =
@@ -17,15 +14,12 @@ extern "C" {
     fn AXIsProcessTrusted() -> u8;
 }
 
-/// Whether macOS lets this process send keystrokes. The user grants it under
-/// Privacy & Security > Accessibility, and the answer can change while running.
 #[allow(unsafe_code)]
 pub fn allowed() -> bool {
     // SAFETY: takes no arguments and only reads this process's trust state.
     unsafe { AXIsProcessTrusted() != 0 }
 }
 
-/// Sends Cmd+V shortly after returning, without blocking the caller.
 pub fn send_after_delay() {
     thread::spawn(|| {
         thread::sleep(DELAY);
