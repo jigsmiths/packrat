@@ -29,6 +29,10 @@ package version: licenses
     mkdir -p dist
     ditto -c -k --keepParent {{app_bundle}} dist/Packrat-{{version}}.zip
 
+# Render the app and menu bar icons from their SVG sources
+icons:
+    scripts/icons.sh
+
 test:
     cargo test --workspace
 
