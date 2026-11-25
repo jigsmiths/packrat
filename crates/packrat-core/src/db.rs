@@ -80,7 +80,9 @@ impl Db {
 
         let db = Self { conn };
         db.migrate()?;
-        let _ = db.vacuum_if_fragmented();
+        if let Err(err) = db.vacuum_if_fragmented() {
+            log::warn!("vacuum failed: {err}");
+        }
         Ok(db)
     }
 
