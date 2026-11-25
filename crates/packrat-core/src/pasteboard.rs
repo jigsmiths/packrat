@@ -31,7 +31,13 @@ pub struct Image {
     pub png: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub file_name: Option<String>,
+    pub source: ImageSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageSource {
+    File(String),
+    Data,
 }
 
 impl std::fmt::Debug for Image {
@@ -40,7 +46,7 @@ impl std::fmt::Debug for Image {
             .field("bytes", &self.png.len())
             .field("width", &self.width)
             .field("height", &self.height)
-            .field("file_name", &self.file_name)
+            .field("source", &self.source)
             .finish()
     }
 }
@@ -53,10 +59,13 @@ pub struct Snapshot {
     pub concealed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChangedDuringRead;
+
 pub trait Pasteboard {
     fn change_count(&self) -> isize;
 
-    fn snapshot(&self) -> Option<Snapshot>;
+    fn snapshot(&self) -> Result<Snapshot, ChangedDuringRead>;
 }
 
 pub struct SystemPasteboard;
@@ -66,7 +75,7 @@ impl Pasteboard for SystemPasteboard {
         NSPasteboard::generalPasteboard().changeCount()
     }
 
-    fn snapshot(&self) -> Option<Snapshot> {
+    fn snapshot(&self) -> Result<Snapshot, ChangedDuringRead> {
         autoreleasepool(|_| {
             let pasteboard = NSPasteboard::generalPasteboard();
             let change_count = pasteboard.changeCount();
@@ -92,7 +101,10 @@ impl Pasteboard for SystemPasteboard {
                 None
             };
 
-            (pasteboard.changeCount() == change_count).then_some(Snapshot {
+            if pasteboard.changeCount() != change_count {
+                return Err(ChangedDuringRead);
+            }
+            Ok(Snapshot {
                 change_count,
                 text,
                 image,
@@ -129,9 +141,9 @@ fn read_image_file(path: &Path) -> Option<Image> {
         return None;
     }
     let mut image = to_png(std::fs::read(path).ok()?)?;
-    image.file_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned());
+    image.source = path.file_name().map_or(ImageSource::Data, |name| {
+        ImageSource::File(name.to_string_lossy().into_owned())
+    });
     Some(image)
 }
 
@@ -148,7 +160,7 @@ fn to_png(bytes: Vec<u8>) -> Option<Image> {
             png: bytes,
             width,
             height,
-            file_name: None,
+            source: ImageSource::Data,
         });
     }
     let rep = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(&bytes))?;
@@ -161,7 +173,7 @@ fn to_png(bytes: Vec<u8>) -> Option<Image> {
         png: png.to_vec(),
         width: usize::try_from(rep.pixelsWide()).ok()?,
         height: usize::try_from(rep.pixelsHigh()).ok()?,
-        file_name: None,
+        source: ImageSource::Data,
     })
 }
 
@@ -303,7 +315,7 @@ mod tests {
         let image = to_png(TINY_PNG.to_vec()).unwrap();
         assert_eq!(image.png, TINY_PNG);
         assert_eq!((image.width, image.height), (1, 1));
-        assert_eq!(image.file_name, None);
+        assert_eq!(image.source, ImageSource::Data);
     }
 
     #[test]
@@ -341,7 +353,7 @@ mod tests {
 
         let image = read_image_file(&path).unwrap();
         assert_eq!(image.png, TINY_PNG);
-        assert_eq!(image.file_name.as_deref(), Some("Screenshot.png"));
+        assert_eq!(image.source, ImageSource::File("Screenshot.png".to_owned()));
     }
 
     #[test]
@@ -393,6 +405,6 @@ mod tests {
         assert_eq!(snapshot.text, None);
         let image = snapshot.image.expect("no image on the pasteboard");
         assert_eq!(image.png, TINY_PNG);
-        assert_eq!(image.file_name, None);
+        assert_eq!(image.source, ImageSource::Data);
     }
 }

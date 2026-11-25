@@ -1,5 +1,5 @@
 use crate::history::{Added, History};
-use crate::pasteboard::{Pasteboard, MAX_IMAGE_BYTES};
+use crate::pasteboard::{ImageSource, Pasteboard, MAX_IMAGE_BYTES};
 use crate::Result;
 
 const PRUNE_INTERVAL_MS: i64 = 60_000;
@@ -23,7 +23,7 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new(pasteboard: &impl Pasteboard) -> Self {
+    pub fn starting_after_current(pasteboard: &impl Pasteboard) -> Self {
         Self {
             last_change_count: pasteboard.change_count(),
             last_prune_ms: None,
@@ -63,7 +63,7 @@ impl Collector {
             self.last_change_count = change_count;
             return Ok(poll);
         }
-        let Some(snapshot) = pasteboard.snapshot() else {
+        let Ok(snapshot) = pasteboard.snapshot() else {
             return Ok(poll);
         };
         self.last_change_count = snapshot.change_count;
@@ -77,7 +77,7 @@ impl Collector {
         let text = snapshot.text.filter(|text| !text.is_empty());
         poll.added = match (image, text) {
             // The text next to a copied file is only its name.
-            (Some(image), _) if image.file_name.is_some() => {
+            (Some(image), _) if matches!(image.source, ImageSource::File(_)) => {
                 Some(history.add_image(&image, now_ms)?)
             }
             (_, Some(text)) => Some(history.add(&text, now_ms)?),
@@ -97,7 +97,7 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::history::hash_content;
-    use crate::pasteboard::{Image, Snapshot};
+    use crate::pasteboard::{ChangedDuringRead, Image, Snapshot};
 
     const HOUR: i64 = 60 * 60 * 1000;
 
@@ -143,11 +143,11 @@ mod tests {
             self.change_count.get()
         }
 
-        fn snapshot(&self) -> Option<Snapshot> {
+        fn snapshot(&self) -> std::result::Result<Snapshot, ChangedDuringRead> {
             if self.changing_mid_read.get() {
-                return None;
+                return Err(ChangedDuringRead);
             }
-            Some(Snapshot {
+            Ok(Snapshot {
                 change_count: self.change_count.get(),
                 text: self.text.borrow().clone(),
                 image: self.image.borrow().clone(),
@@ -171,7 +171,7 @@ mod tests {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
         pasteboard.copy("copied before launch");
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         let poll = collector.poll(&pasteboard, &mut history, 0).unwrap();
         assert_eq!(poll.added, None);
@@ -182,7 +182,7 @@ mod tests {
     fn a_new_copy_is_captured_once() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         pasteboard.copy("hello");
         let first = collector.poll(&pasteboard, &mut history, 100).unwrap();
@@ -198,7 +198,7 @@ mod tests {
     fn copying_known_text_again_bumps_it() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         pasteboard.copy("one");
         collector.poll(&pasteboard, &mut history, 100).unwrap();
@@ -215,7 +215,7 @@ mod tests {
     fn concealed_copies_are_skipped() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         pasteboard.copy_secret("hunter2");
         let poll = collector.poll(&pasteboard, &mut history, 100).unwrap();
@@ -233,7 +233,7 @@ mod tests {
     fn empty_and_non_text_copies_are_skipped() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         pasteboard.copy("");
         collector.poll(&pasteboard, &mut history, 100).unwrap();
@@ -242,12 +242,12 @@ mod tests {
         assert!(history.clips().is_empty());
     }
 
-    fn image(png: Vec<u8>, file_name: Option<&str>) -> Image {
+    fn image(png: Vec<u8>, source: ImageSource) -> Image {
         Image {
             png,
             width: 2,
             height: 1,
-            file_name: file_name.map(str::to_owned),
+            source,
         }
     }
 
@@ -255,9 +255,9 @@ mod tests {
     fn image_data_is_captured() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), None), None);
+        pasteboard.copy_image(image(b"png".to_vec(), ImageSource::Data), None);
         let poll = collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert_eq!(poll.added, Some(Added::New));
         assert_eq!(contents(&history), ["Image 2×1"]);
@@ -267,9 +267,12 @@ mod tests {
     fn a_copied_image_file_beats_its_name() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), Some("shot.png")), Some("shot.png"));
+        pasteboard.copy_image(
+            image(b"png".to_vec(), ImageSource::File("shot.png".to_owned())),
+            Some("shot.png"),
+        );
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert_eq!(contents(&history), ["shot.png · 2×1"]);
     }
@@ -278,9 +281,9 @@ mod tests {
     fn text_beats_image_data() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), None), Some("caption"));
+        pasteboard.copy_image(image(b"png".to_vec(), ImageSource::Data), Some("caption"));
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert_eq!(contents(&history), ["caption"]);
     }
@@ -289,14 +292,17 @@ mod tests {
     fn oversized_images_are_skipped() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
         let huge = vec![0; MAX_IMAGE_BYTES + 1];
 
-        pasteboard.copy_image(image(huge.clone(), None), None);
+        pasteboard.copy_image(image(huge.clone(), ImageSource::Data), None);
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert!(history.clips().is_empty());
 
-        pasteboard.copy_image(image(huge, Some("big.png")), Some("big.png"));
+        pasteboard.copy_image(
+            image(huge, ImageSource::File("big.png".to_owned())),
+            Some("big.png"),
+        );
         collector.poll(&pasteboard, &mut history, 200).unwrap();
         assert_eq!(contents(&history), ["big.png"]);
     }
@@ -305,9 +311,9 @@ mod tests {
     fn concealed_images_are_skipped() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), None), None);
+        pasteboard.copy_image(image(b"png".to_vec(), ImageSource::Data), None);
         pasteboard.concealed.set(true);
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert!(history.clips().is_empty());
@@ -317,7 +323,7 @@ mod tests {
     fn whitespace_only_text_is_kept() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         pasteboard.copy("  \n");
         collector.poll(&pasteboard, &mut history, 100).unwrap();
@@ -328,7 +334,7 @@ mod tests {
     fn a_read_that_races_a_change_is_retried() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         pasteboard.copy("settled");
         pasteboard.changing_mid_read.set(true);
@@ -344,7 +350,7 @@ mod tests {
     fn copies_made_while_paused_are_never_captured() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
 
         collector.set_paused(true);
         assert!(collector.is_paused());
@@ -364,7 +370,7 @@ mod tests {
     fn expired_clips_are_pruned_at_most_once_a_minute() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
         history.add("old", 0).unwrap();
 
         let start = 24 * HOUR;
@@ -394,7 +400,7 @@ mod tests {
     fn pruning_still_runs_while_paused() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
-        let mut collector = Collector::new(&pasteboard);
+        let mut collector = Collector::starting_after_current(&pasteboard);
         history.add("old", 0).unwrap();
         history.add("pinned", 0).unwrap();
         history.toggle_pin(&hash_content("pinned")).unwrap();
