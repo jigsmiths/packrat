@@ -12,9 +12,9 @@
     <circle cx="206" cy="290" r="24" fill="#000"/>
     <circle cx="306" cy="290" r="24" fill="#000"/>
   </mask>
-  <g fill="#fff" mask="url(#ear-gap)">
+  <g fill="#000" mask="url(#ear-gap)">
     <ellipse cx="146" cy="196" rx="62" ry="78" transform="rotate(-32 146 196)"/>
     <ellipse cx="366" cy="196" rx="62" ry="78" transform="rotate(32 366 196)"/>
   </g>
-  <use href="#head" fill="#fff" mask="url(#eyes)"/>
+  <use href="#head" fill="#000" mask="url(#eyes)"/>
 </svg>
