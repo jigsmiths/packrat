@@ -188,7 +188,7 @@ impl Db {
         found(changed)
     }
 
-    pub fn set_last_used_at(&self, hash: &str, last_used_at_ms: i64) -> Result<()> {
+    pub fn set_last_used_at_ms(&self, hash: &str, last_used_at_ms: i64) -> Result<()> {
         let changed = self.conn.execute(
             "UPDATE clips SET last_used_at = ?1 WHERE hash = ?2",
             params![last_used_at_ms, hash],
@@ -433,7 +433,7 @@ mod tests {
         assert!(matches!(db.delete("nope"), Err(Error::NotFound)));
         assert!(matches!(db.set_pinned("nope", true), Err(Error::NotFound)));
         assert!(matches!(
-            db.set_last_used_at("nope", 1),
+            db.set_last_used_at_ms("nope", 1),
             Err(Error::NotFound)
         ));
     }
@@ -449,12 +449,12 @@ mod tests {
     }
 
     #[test]
-    fn set_last_used_at_leaves_created_at_alone() {
+    fn set_last_used_at_ms_leaves_created_at_ms_alone() {
         let (_dir, db) = open_temp();
         let mut added = clip("h1", "one", 1);
         added.created_at_ms = 1;
         db.insert(&added).unwrap();
-        db.set_last_used_at("h1", 99).unwrap();
+        db.set_last_used_at_ms("h1", 99).unwrap();
         let loaded = &db.load_without_image_data().unwrap()[0];
         assert_eq!((loaded.created_at_ms, loaded.last_used_at_ms), (1, 99));
     }
