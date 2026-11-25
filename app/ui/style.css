@@ -82,11 +82,32 @@ main {
 }
 
 #list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   padding: 4px 8px;
   border-radius: 4px;
   white-space: nowrap;
+}
+
+#list li .summary {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#list li .age {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+#list li.selected .age {
+  color: var(--select-text);
+  opacity: 0.75;
 }
 
 #list li.selected {
@@ -95,11 +116,14 @@ main {
 }
 
 #list li.pinned::before {
-  content: "\25CF";
-  margin-right: 6px;
-  font-size: 9px;
-  vertical-align: 1px;
-  color: var(--pin);
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  background: var(--pin);
+  mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M5 1h6v1.5h-1V6l2.5 3v1.5h-9V9L6 6V2.5H5zM7.4 10.5h1.2V15L8 16l-.6-1z'/></svg>")
+    center / contain no-repeat;
 }
 
 #list li.blank,

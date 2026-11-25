@@ -78,7 +78,8 @@ mod tests {
             .map(|(index, content)| Clip {
                 hash: format!("hash{index}"),
                 content: (*content).to_owned(),
-                created_at: 0,
+                created_at_ms: 0,
+                last_used_at_ms: 0,
                 pinned: false,
                 kind: crate::db::Kind::Text,
                 size: content.len(),

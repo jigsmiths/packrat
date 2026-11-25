@@ -20,6 +20,8 @@ pub struct Row {
     pinned: bool,
     image: bool,
     size: usize,
+    created_at_ms: i64,
+    last_used_at_ms: i64,
 }
 
 #[derive(Serialize)]
@@ -100,6 +102,8 @@ pub fn list_clips(state: State<AppState>, query: String) -> Result<Listing, Stri
                     pinned: clip.pinned,
                     image: clip.kind == Kind::Image,
                     size: clip.size,
+                    created_at_ms: clip.created_at_ms,
+                    last_used_at_ms: clip.last_used_at_ms,
                 })
                 .collect(),
         })

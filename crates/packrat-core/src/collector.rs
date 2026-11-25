@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(first.added, Some(Added::New));
         assert!(first.changed());
         assert_eq!(second.added, None);
-        assert_eq!(history.clips()[0].created_at, 100);
+        assert_eq!(history.clips()[0].created_at_ms, 100);
     }
 
     #[test]
