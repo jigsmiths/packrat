@@ -1,5 +1,3 @@
-// Renders an SVG to a square PNG with AppKit, keeping transparency.
-// Usage: render-svg <in.svg> <out.png> <pixels>
 import AppKit
 
 let args = CommandLine.arguments

@@ -9,9 +9,10 @@ trap 'rm -rf "$work"' EXIT
 swiftc -O -o "$work/render-svg" scripts/render-svg.swift
 render="$work/render-svg"
 
-# Menu bar template image at 22pt @2x
-"$render" "$icons/tray.svg" "$icons/tray.png" 44
-"$render" "$icons/icon.svg" "$icons/icon.png" 512
+menu_bar_22pt_at_2x=44
+app_icon_px=512
+"$render" "$icons/tray.svg" "$icons/tray.png" "$menu_bar_22pt_at_2x"
+"$render" "$icons/icon.svg" "$icons/icon.png" "$app_icon_px"
 
 mkdir "$work/icon.iconset"
 for size in 16 32 128 256 512; do
