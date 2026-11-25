@@ -65,7 +65,14 @@ function renderList() {
     const item = document.createElement("li");
     item.setAttribute("role", "option");
     item.dataset.hash = row.hash;
-    item.textContent = row.summary === "" ? "(blank)" : row.summary;
+    const summary = document.createElement("span");
+    summary.className = "summary";
+    summary.textContent = row.summary === "" ? "(blank)" : row.summary;
+    const age = document.createElement("span");
+    age.className = "age";
+    age.textContent = formatAge(row.created_at);
+    age.title = `added ${formatTime(row.created_at)}`;
+    item.replaceChildren(summary, age);
     item.classList.toggle("blank", row.summary === "");
     item.classList.toggle("pinned", row.pinned);
     return item;
@@ -78,6 +85,26 @@ function renderList() {
   }
   list.replaceChildren(...items);
   markSelection();
+}
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+// A short age such as "now", "12m", "3h" or "2d".
+function formatAge(timeMs) {
+  const elapsed = Math.max(0, Date.now() - timeMs);
+  if (elapsed < MINUTE_MS) return "now";
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h`;
+  return `${Math.floor(elapsed / DAY_MS)}d`;
+}
+
+function formatTime(timeMs) {
+  const time = new Date(timeMs);
+  const options = { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" };
+  if (time.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return time.toLocaleString(undefined, options);
 }
 
 function markSelection() {
@@ -136,6 +163,7 @@ async function renderPreview() {
   let details = "";
   try {
     const parts = [];
+    let truncated = false;
     if (row.image) {
       const bytes = await invoke("image_clip", { hash: row.hash });
       url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
@@ -143,10 +171,15 @@ async function renderPreview() {
     } else {
       const shown = await invoke("preview_clip", { hash: row.hash });
       parts.push(`${shown.chars.toLocaleString()} characters`, formatBytes(row.size));
-      if (shown.truncated) parts.push("showing the first 100 KB");
+      truncated = shown.truncated;
       text = shown.text;
     }
-    if (row.pinned) parts.splice(row.image ? 1 : 2, 0, "pinned");
+    if (row.pinned) parts.push("pinned");
+    parts.push(`added ${formatTime(row.created_at)}`);
+    if (row.last_used_at !== row.created_at) {
+      parts.push(`last used ${formatTime(row.last_used_at)}`);
+    }
+    if (truncated) parts.push("showing the first 100 KB");
     details = parts.join(" • ");
   } catch (err) {
     details = String(err);

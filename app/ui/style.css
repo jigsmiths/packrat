@@ -82,11 +82,32 @@ main {
 }
 
 #list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   padding: 4px 8px;
   border-radius: 4px;
   white-space: nowrap;
+}
+
+#list li .summary {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#list li .age {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+#list li.selected .age {
+  color: var(--select-text);
+  opacity: 0.75;
 }
 
 #list li.selected {
@@ -96,7 +117,6 @@ main {
 
 #list li.pinned::before {
   content: "\25CF";
-  margin-right: 6px;
   font-size: 9px;
   vertical-align: 1px;
   color: var(--pin);

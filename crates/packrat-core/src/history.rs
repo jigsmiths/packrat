@@ -55,6 +55,7 @@ impl History {
             hash,
             content: content.to_owned(),
             created_at: now_ms,
+            last_used_at: now_ms,
             pinned: false,
             kind: Kind::Text,
             size: content.len(),
@@ -75,6 +76,7 @@ impl History {
             hash,
             content: image_label(image),
             created_at: now_ms,
+            last_used_at: now_ms,
             pinned: false,
             kind: Kind::Image,
             size: image.png.len(),
@@ -91,9 +93,9 @@ impl History {
 
     pub fn touch(&mut self, hash: &str, now_ms: i64) -> Result<()> {
         let index = self.position(hash).ok_or(Error::NotFound)?;
-        let result = self.db.set_created_at(hash, now_ms);
+        let result = self.db.set_last_used_at(hash, now_ms);
         self.drop_if_missing(index, result)?;
-        self.clips[index].created_at = now_ms;
+        self.clips[index].last_used_at = now_ms;
         self.sort();
         Ok(())
     }
@@ -126,7 +128,7 @@ impl History {
         self.db.delete_expired(cutoff)?;
         let before = self.clips.len();
         self.clips
-            .retain(|clip| clip.pinned || clip.created_at >= cutoff);
+            .retain(|clip| clip.pinned || clip.last_used_at >= cutoff);
         Ok(before - self.clips.len())
     }
 
@@ -136,7 +138,7 @@ impl History {
 
     fn sort(&mut self) {
         self.clips
-            .sort_by_key(|clip| (!clip.pinned, Reverse(clip.created_at)));
+            .sort_by_key(|clip| (!clip.pinned, Reverse(clip.last_used_at)));
     }
 
     fn drop_if_missing(&mut self, index: usize, result: Result<()>) -> Result<()> {
@@ -250,7 +252,7 @@ mod tests {
         history.add("two", 200).unwrap();
         assert_eq!(history.add("one", 300).unwrap(), Added::Bumped);
         assert_eq!(contents(&history), ["one", "two"]);
-        assert_eq!(history.clips()[0].created_at, 300);
+        assert_eq!(history.clips()[0].last_used_at, 300);
 
         drop(history);
         assert_eq!(contents(&open(&path)), ["one", "two"]);
@@ -289,6 +291,23 @@ mod tests {
         history.add("two", 200).unwrap();
         history.touch(&hash_content("one"), 300).unwrap();
         assert_eq!(contents(&history), ["one", "two"]);
+    }
+
+    #[test]
+    fn using_a_clip_again_keeps_when_it_was_added() {
+        let (_dir, path, mut history) = open_temp();
+        history.add("copied twice", 100).unwrap();
+        history.add("copied twice", 200).unwrap();
+        history.add("picked", 100).unwrap();
+        history.touch(&hash_content("picked"), 300).unwrap();
+        for clip in history.clips() {
+            assert_eq!(clip.created_at, 100, "{}", clip.content);
+        }
+
+        drop(history);
+        for clip in open(&path).clips() {
+            assert_eq!(clip.created_at, 100, "{}", clip.content);
+        }
     }
 
     #[test]

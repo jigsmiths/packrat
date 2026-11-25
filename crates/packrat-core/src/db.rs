@@ -22,10 +22,17 @@ CREATE TABLE IF NOT EXISTS clips (
 CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at);
 ";
 
-const MIGRATIONS: [&str; 1] = ["
+const MIGRATIONS: [&str; 2] = [
+    "
 ALTER TABLE clips ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE clips ADD COLUMN data BLOB;
-"];
+",
+    "
+ALTER TABLE clips ADD COLUMN last_used_at INTEGER NOT NULL DEFAULT 0;
+UPDATE clips SET last_used_at = created_at;
+CREATE INDEX idx_clips_last_used_at ON clips(last_used_at);
+",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -33,11 +40,15 @@ pub enum Kind {
     Image = 1,
 }
 
+/// One stored clipboard entry. Times are Unix time in milliseconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clip {
     pub hash: String,
     pub content: String,
+    /// When the content was first captured.
     pub created_at: i64,
+    /// When it was last captured or picked from the popup. Expiry and order use this.
+    pub last_used_at: i64,
     pub pinned: bool,
     pub kind: Kind,
     pub size: usize,
@@ -112,12 +123,13 @@ impl Db {
 
     fn insert_with_data(&self, clip: &Clip, data: Option<&[u8]>) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO clips (hash, content, created_at, pinned, kind, data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO clips (hash, content, created_at, last_used_at, pinned, kind, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 clip.hash,
                 clip.content,
                 clip.created_at,
+                clip.last_used_at,
                 clip.pinned,
                 clip.kind as i64,
                 data
@@ -126,11 +138,12 @@ impl Db {
         Ok(())
     }
 
+    /// Returns all clips, least recently used first. Image bytes stay on disk, see `load_data`.
     pub fn load_all(&self) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(
-            "SELECT hash, content, created_at, pinned, kind,
+            "SELECT hash, content, created_at, last_used_at, pinned, kind,
                     COALESCE(length(data), length(CAST(content AS BLOB)))
-             FROM clips ORDER BY created_at",
+             FROM clips ORDER BY last_used_at",
         )?;
         let clips = stmt
             .query_map([], |row| {
@@ -138,12 +151,13 @@ impl Db {
                     hash: row.get(0)?,
                     content: row.get(1)?,
                     created_at: row.get(2)?,
-                    pinned: row.get(3)?,
-                    kind: match row.get::<_, i64>(4)? {
+                    last_used_at: row.get(3)?,
+                    pinned: row.get(4)?,
+                    kind: match row.get::<_, i64>(5)? {
                         1 => Kind::Image,
                         _ => Kind::Text,
                     },
-                    size: usize::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+                    size: usize::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -178,17 +192,18 @@ impl Db {
         found(changed)
     }
 
-    pub fn set_created_at(&self, hash: &str, created_at: i64) -> Result<()> {
+    pub fn set_last_used_at(&self, hash: &str, last_used_at: i64) -> Result<()> {
         let changed = self.conn.execute(
-            "UPDATE clips SET created_at = ?1 WHERE hash = ?2",
-            params![created_at, hash],
+            "UPDATE clips SET last_used_at = ?1 WHERE hash = ?2",
+            params![last_used_at, hash],
         )?;
         found(changed)
     }
 
+    /// Deletes unpinned clips last used before `cutoff` and returns how many were removed.
     pub fn delete_expired(&self, cutoff: i64) -> Result<usize> {
         Ok(self.conn.execute(
-            "DELETE FROM clips WHERE pinned = 0 AND created_at < ?1",
+            "DELETE FROM clips WHERE pinned = 0 AND last_used_at < ?1",
             [cutoff],
         )?)
     }
@@ -219,11 +234,12 @@ mod tests {
 
     const KEY: Key = [7; 32];
 
-    fn clip(hash: &str, content: &str, created_at: i64) -> Clip {
+    fn clip(hash: &str, content: &str, last_used_at: i64) -> Clip {
         Clip {
             hash: hash.into(),
             content: content.into(),
-            created_at,
+            created_at: 0,
+            last_used_at,
             pinned: false,
             kind: Kind::Text,
             size: content.len(),
@@ -355,9 +371,13 @@ mod tests {
 
         let db = Db::open(&path, &KEY).unwrap();
         let mut pinned = clip("h1", "one", 1);
+        pinned.created_at = 1;
         pinned.pinned = true;
         assert_eq!(db.load_all().unwrap(), vec![pinned]);
-        assert_eq!(db.pragma_i64("user_version").unwrap(), 1);
+        assert_eq!(
+            db.pragma_i64("user_version").unwrap(),
+            MIGRATIONS.len() as i64
+        );
 
         drop(db);
         Db::open(&path, &KEY).unwrap();
@@ -406,7 +426,10 @@ mod tests {
         let (_dir, db) = open_temp();
         assert!(matches!(db.delete("nope"), Err(Error::NotFound)));
         assert!(matches!(db.set_pinned("nope", true), Err(Error::NotFound)));
-        assert!(matches!(db.set_created_at("nope", 1), Err(Error::NotFound)));
+        assert!(matches!(
+            db.set_last_used_at("nope", 1),
+            Err(Error::NotFound)
+        ));
     }
 
     #[test]
@@ -420,11 +443,23 @@ mod tests {
     }
 
     #[test]
-    fn set_created_at_updates_the_timestamp() {
+    fn set_last_used_at_leaves_created_at_alone() {
         let (_dir, db) = open_temp();
-        db.insert(&clip("h1", "one", 1)).unwrap();
-        db.set_created_at("h1", 99).unwrap();
-        assert_eq!(db.load_all().unwrap()[0].created_at, 99);
+        let mut added = clip("h1", "one", 1);
+        added.created_at = 1;
+        db.insert(&added).unwrap();
+        db.set_last_used_at("h1", 99).unwrap();
+        let loaded = &db.load_all().unwrap()[0];
+        assert_eq!((loaded.created_at, loaded.last_used_at), (1, 99));
+    }
+
+    #[test]
+    fn delete_expired_goes_by_last_use() {
+        let (_dir, db) = open_temp();
+        let mut old_but_used = clip("h1", "one", 900);
+        old_but_used.created_at = 100;
+        db.insert(&old_but_used).unwrap();
+        assert_eq!(db.delete_expired(500).unwrap(), 0);
     }
 
     #[test]
@@ -439,6 +474,29 @@ mod tests {
         assert_eq!(db.delete_expired(500).unwrap(), 1);
         let hashes: Vec<_> = db.load_all().unwrap().into_iter().map(|c| c.hash).collect();
         assert_eq!(hashes, ["old-pinned", "edge", "new"]);
+    }
+
+    #[test]
+    fn version_1_database_gains_last_used_at_from_created_at() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("packrat.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&key_pragma(&KEY)).unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE clips ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE clips ADD COLUMN data BLOB;
+                 PRAGMA user_version = 1;
+                 INSERT INTO clips (hash, content, created_at, pinned) VALUES ('h1', 'one', 123, 1);",
+            )
+            .unwrap();
+        }
+
+        let db = Db::open(&path, &KEY).unwrap();
+        let loaded = &db.load_all().unwrap()[0];
+        assert_eq!((loaded.created_at, loaded.last_used_at), (123, 123));
+        assert!(loaded.pinned);
     }
 
     fn fill(db: &Db, rows: usize) {

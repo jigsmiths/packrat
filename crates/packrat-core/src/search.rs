@@ -79,6 +79,7 @@ mod tests {
                 hash: format!("hash{index}"),
                 content: (*content).to_owned(),
                 created_at: 0,
+                last_used_at: 0,
                 pinned: false,
                 kind: crate::db::Kind::Text,
                 size: content.len(),
