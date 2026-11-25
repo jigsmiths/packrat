@@ -9,15 +9,8 @@ const KEY_V: u16 = 9;
 const ACCESSIBILITY_SETTINGS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXIsProcessTrusted() -> u8;
-}
-
-#[allow(unsafe_code)]
 pub fn accessibility_trusted() -> bool {
-    // SAFETY: takes no arguments and only reads this process's trust state.
-    unsafe { AXIsProcessTrusted() != 0 }
+    objc2_core_graphics::CGPreflightPostEventAccess()
 }
 
 pub fn send_after_delay() {
