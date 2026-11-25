@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 
 use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyObject;
-use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardTypeString,
-};
+use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard};
 use objc2_foundation::{NSData, NSDictionary, NSString, NSURL};
 
 pub const MAX_IMAGE_BYTES: usize = 25 * 1024 * 1024;
@@ -16,6 +14,7 @@ const CONCEALED_TYPES: [&str; 2] = [
 ];
 
 // The values of AppKit's NSPasteboardType constants, which are unsafe to read.
+const TEXT_TYPE: &str = "public.utf8-plain-text";
 const FILE_URL_TYPE: &str = "public.file-url";
 const PNG_TYPE: &str = "public.png";
 const TIFF_TYPE: &str = "public.tiff";
@@ -83,10 +82,8 @@ impl Pasteboard for SystemPasteboard {
                 .types()
                 .map(|types| types.iter().map(|name| name.to_string()).collect())
                 .unwrap_or_default();
-            // SAFETY: NSPasteboardTypeString is an immutable constant exported by AppKit.
-            #[allow(unsafe_code)]
             let text = pasteboard
-                .stringForType(unsafe { NSPasteboardTypeString })
+                .stringForType(&NSString::from_str(TEXT_TYPE))
                 .map(|text| text.to_string());
             let concealed = is_concealed(&types);
             let has_file = types.iter().any(|name| name == FILE_URL_TYPE);
@@ -196,14 +193,11 @@ fn is_image_file(path: &Path) -> bool {
 }
 
 impl SystemPasteboard {
-    #[allow(unsafe_code)]
     pub fn write_text(&self, text: &str) -> bool {
         autoreleasepool(|_| {
             let pasteboard = NSPasteboard::generalPasteboard();
             pasteboard.clearContents();
-            // SAFETY: as in `snapshot`.
-            pasteboard
-                .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString })
+            pasteboard.setString_forType(&NSString::from_str(text), &NSString::from_str(TEXT_TYPE))
         })
     }
 
