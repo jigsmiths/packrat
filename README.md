@@ -11,7 +11,8 @@ Early development, not ready for daily use.
 Working today:
 
 - Text clipboard history with pinning, fuzzy search and expiry of unpinned clips
-- Image clips, including image files copied in Finder, stored as PNG up to 25 MB and searchable by file name
+- Image clips, stored as PNG up to 25 MB
+- File clips: any single file copied in Finder, up to 25 MB, kept as its original bytes, searchable by file name and pasted back as a file. Images and PDFs also paste as content.
 - Skips secrets copied from password managers
 - History encrypted at rest, with the key in the macOS Keychain
 - Popup on Cmd+Shift+V that pastes the chosen clip into the app you were using

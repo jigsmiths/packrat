@@ -1,10 +1,12 @@
+use std::path::PathBuf;
+
 use packrat_core::db::Kind;
 use packrat_core::history::History;
-use packrat_core::pasteboard::SystemPasteboard;
+use packrat_core::pasteboard::{self, SystemPasteboard};
 use packrat_core::search::search;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::capture::now_ms;
 use crate::{paste, popup, AppState, HistoryState};
@@ -12,13 +14,22 @@ use crate::{paste, popup, AppState, HistoryState};
 const MAX_ROWS: usize = 500;
 const SUMMARY_CHARS: usize = 200;
 const PREVIEW_BYTES: usize = 100 * 1024;
+const STAGING_DIR: &str = "pasted";
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowKind {
+    Text,
+    Image,
+    File,
+}
 
 #[derive(Serialize)]
 pub struct Row {
     hash: String,
     summary: String,
     pinned: bool,
-    image: bool,
+    kind: RowKind,
     size: usize,
     created_at_ms: i64,
     last_used_at_ms: i64,
@@ -111,7 +122,11 @@ pub fn list_clips(state: State<AppState>, query: String) -> Result<Listing, Stri
                     hash: clip.hash.clone(),
                     summary: summarize(&clip.content),
                     pinned: clip.pinned,
-                    image: clip.kind == Kind::Image,
+                    kind: match clip.kind {
+                        Kind::Text => RowKind::Text,
+                        Kind::Image => RowKind::Image,
+                        Kind::File => RowKind::File,
+                    },
                     size: clip.size,
                     created_at_ms: clip.created_at_ms,
                     last_used_at_ms: clip.last_used_at_ms,
@@ -135,12 +150,36 @@ pub fn preview_clip(state: State<AppState>, hash: String) -> Result<Preview, Str
 
 #[tauri::command]
 pub fn image_clip(state: State<AppState>, hash: String) -> Result<Response, String> {
-    with_history(&state, |history| history.image_data(&hash)).map(Response::new)
+    with_history(&state, |history| {
+        match kind_and_content(history, &hash)?.0 {
+            Kind::Image => history.data(&hash),
+            Kind::File => history.thumbnail(&hash),
+            Kind::Text => Err(packrat_core::Error::NotFound),
+        }
+    })
+    .map(Response::new)
+}
+
+fn kind_and_content(history: &History, hash: &str) -> packrat_core::Result<(Kind, String)> {
+    history
+        .clips()
+        .iter()
+        .find(|clip| clip.hash == hash)
+        .map(|clip| (clip.kind, clip.content.clone()))
+        .ok_or(packrat_core::Error::NotFound)
+}
+
+pub fn staging_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map(|dir| dir.join(STAGING_DIR))
+        .map_err(|err| err.to_string())
 }
 
 enum Payload {
     Text(String),
     Image(Vec<u8>),
+    File { name: String, bytes: Vec<u8> },
 }
 
 #[tauri::command]
@@ -151,15 +190,14 @@ pub fn copy_clip(
     action: Action,
 ) -> Result<Outcome, String> {
     let payload = with_history(&state, |history| {
-        let (kind, content) = history
-            .clips()
-            .iter()
-            .find(|clip| clip.hash == hash)
-            .map(|clip| (clip.kind, clip.content.clone()))
-            .ok_or(packrat_core::Error::NotFound)?;
+        let (kind, content) = kind_and_content(history, &hash)?;
         let payload = match kind {
             Kind::Text => Payload::Text(content),
-            Kind::Image => Payload::Image(history.image_data(&hash)?),
+            Kind::Image => Payload::Image(history.data(&hash)?),
+            Kind::File => Payload::File {
+                name: content,
+                bytes: history.data(&hash)?,
+            },
         };
         history.bump(&hash, now_ms())?;
         Ok(payload)
@@ -167,6 +205,11 @@ pub fn copy_clip(
     let written = match &payload {
         Payload::Text(text) => SystemPasteboard.write_text(text),
         Payload::Image(png) => SystemPasteboard.write_image(png),
+        Payload::File { name, bytes } => {
+            let staged = pasteboard::replace_staged_file(&staging_dir(&app)?, name, bytes)
+                .map_err(|err| format!("could not write the file to paste: {err}"))?;
+            SystemPasteboard.write_file(&staged, bytes)
+        }
     };
     if !written {
         return Err("could not write to the clipboard".to_owned());

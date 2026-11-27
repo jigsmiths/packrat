@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS clips (
 CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at);
 ";
 
-const MIGRATIONS: [&str; 2] = [
+const MIGRATIONS: [&str; 3] = [
     "
 ALTER TABLE clips ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE clips ADD COLUMN data BLOB;
@@ -32,12 +32,16 @@ ALTER TABLE clips ADD COLUMN last_used_at INTEGER NOT NULL DEFAULT 0;
 UPDATE clips SET last_used_at = created_at;
 CREATE INDEX idx_clips_last_used_at ON clips(last_used_at);
 ",
+    "
+ALTER TABLE clips ADD COLUMN thumbnail BLOB;
+",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Text = 0,
     Image = 1,
+    File = 2,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,17 +117,26 @@ impl Db {
     }
 
     pub fn insert(&self, clip: &Clip) -> Result<()> {
-        self.insert_with_data(clip, None)
+        self.insert_with_data(clip, None, None)
     }
 
     pub fn insert_image(&self, clip: &Clip, png: &[u8]) -> Result<()> {
-        self.insert_with_data(clip, Some(png))
+        self.insert_with_data(clip, Some(png), None)
     }
 
-    fn insert_with_data(&self, clip: &Clip, data: Option<&[u8]>) -> Result<()> {
+    pub fn insert_file(&self, clip: &Clip, bytes: &[u8], thumbnail: Option<&[u8]>) -> Result<()> {
+        self.insert_with_data(clip, Some(bytes), thumbnail)
+    }
+
+    fn insert_with_data(
+        &self,
+        clip: &Clip,
+        data: Option<&[u8]>,
+        thumbnail: Option<&[u8]>,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO clips (hash, content, created_at, last_used_at, pinned, kind, data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO clips (hash, content, created_at, last_used_at, pinned, kind, data, thumbnail)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 clip.hash,
                 clip.content,
@@ -131,7 +144,8 @@ impl Db {
                 clip.last_used_at_ms,
                 clip.pinned,
                 clip.kind as i64,
-                data
+                data,
+                thumbnail
             ],
         )?;
         Ok(())
@@ -153,6 +167,7 @@ impl Db {
                     pinned: row.get(4)?,
                     kind: match row.get::<_, i64>(5)? {
                         1 => Kind::Image,
+                        2 => Kind::File,
                         _ => Kind::Text,
                     },
                     size: usize::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
@@ -163,11 +178,17 @@ impl Db {
     }
 
     pub fn load_data(&self, hash: &str) -> Result<Vec<u8>> {
+        self.load_blob("SELECT data FROM clips WHERE hash = ?1", hash)
+    }
+
+    pub fn load_thumbnail(&self, hash: &str) -> Result<Vec<u8>> {
+        self.load_blob("SELECT thumbnail FROM clips WHERE hash = ?1", hash)
+    }
+
+    fn load_blob(&self, query: &str, hash: &str) -> Result<Vec<u8>> {
         let data: Option<Vec<u8>> = self
             .conn
-            .query_row("SELECT data FROM clips WHERE hash = ?1", [hash], |row| {
-                row.get(0)
-            })
+            .query_row(query, [hash], |row| row.get(0))
             .map_err(|err| match err {
                 rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
                 other => Error::Sqlite(other),
@@ -404,6 +425,65 @@ mod tests {
             vec![image("img", 1, png.len()), clip("txt", "text", 2)]
         );
         assert_eq!(db.load_data("img").unwrap(), png);
+    }
+
+    fn file(hash: &str, name: &str, last_used_at_ms: i64, size: usize) -> Clip {
+        Clip {
+            kind: Kind::File,
+            size,
+            ..clip(hash, name, last_used_at_ms)
+        }
+    }
+
+    #[test]
+    fn file_bytes_and_thumbnail_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("packrat.db");
+        let db = Db::open(&path, &KEY).unwrap();
+        let stored = file("f1", "report.pdf", 1, 4);
+        db.insert_file(&stored, b"%PDF", Some(b"thumb")).unwrap();
+        drop(db);
+
+        let reopened = Db::open(&path, &KEY).unwrap();
+        assert_eq!(reopened.load_without_image_data().unwrap(), vec![stored]);
+        assert_eq!(reopened.load_data("f1").unwrap(), b"%PDF");
+        assert_eq!(reopened.load_thumbnail("f1").unwrap(), b"thumb");
+    }
+
+    #[test]
+    fn clips_without_a_thumbnail_have_none() {
+        let (_dir, db) = open_temp();
+        db.insert_file(&file("f1", "notes.bin", 1, 3), b"raw", None)
+            .unwrap();
+        db.insert(&clip("txt", "text", 2)).unwrap();
+        assert!(matches!(db.load_thumbnail("f1"), Err(Error::NotFound)));
+        assert!(matches!(db.load_thumbnail("txt"), Err(Error::NotFound)));
+        assert!(matches!(db.load_thumbnail("nope"), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn version_2_database_gains_a_thumbnail_column() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("packrat.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&key_pragma(&KEY)).unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute_batch(&format!(
+                "{} {} PRAGMA user_version = 2;
+                 INSERT INTO clips (hash, content, created_at, last_used_at, kind, data)
+                 VALUES ('img', 'Image 1×1', 5, 5, 1, x'89504e47');",
+                MIGRATIONS[0], MIGRATIONS[1]
+            ))
+            .unwrap();
+        }
+
+        let db = Db::open(&path, &KEY).unwrap();
+        assert_eq!(db.load_without_image_data().unwrap()[0].kind, Kind::Image);
+        assert_eq!(db.load_data("img").unwrap(), b"\x89PNG");
+        db.insert_file(&file("f1", "a.txt", 6, 1), b"a", Some(b"t"))
+            .unwrap();
+        assert_eq!(db.load_thumbnail("f1").unwrap(), b"t");
     }
 
     #[test]

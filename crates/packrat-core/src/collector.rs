@@ -1,5 +1,5 @@
 use crate::history::{Added, History};
-use crate::pasteboard::{ImageSource, Pasteboard, MAX_IMAGE_BYTES};
+use crate::pasteboard::{Pasteboard, MAX_IMAGE_BYTES};
 use crate::Result;
 
 const PRUNE_INTERVAL_MS: i64 = 60_000;
@@ -79,14 +79,12 @@ impl Collector {
             .image
             .filter(|image| image.png.len() <= MAX_IMAGE_BYTES);
         let text = snapshot.text.filter(|text| !text.is_empty());
-        poll.added = match (image, text) {
+        poll.added = match (snapshot.file, image, text) {
             // The text next to a copied file is only its name.
-            (Some(image), _) if matches!(image.source, ImageSource::File(_)) => {
-                Some(history.add_image(&image, now_ms)?)
-            }
-            (_, Some(text)) => Some(history.add(&text, now_ms)?),
-            (Some(image), None) => Some(history.add_image(&image, now_ms)?),
-            (None, None) => None,
+            (Some(file), _, _) => Some(history.add_file(&file, now_ms)?),
+            (None, _, Some(text)) => Some(history.add(&text, now_ms)?),
+            (None, Some(image), None) => Some(history.add_image(&image, now_ms)?),
+            (None, None, None) => None,
         };
         Ok(poll)
     }
@@ -99,9 +97,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::db::Db;
+    use crate::db::{Db, Kind};
     use crate::history::hash_content;
-    use crate::pasteboard::{ChangedDuringRead, Image, Snapshot};
+    use crate::pasteboard::{ChangedDuringRead, CopiedFile, Image, Snapshot};
 
     const HOUR: i64 = 60 * 60 * 1000;
 
@@ -110,6 +108,7 @@ mod tests {
         change_count: Cell<isize>,
         text: RefCell<Option<String>>,
         image: RefCell<Option<Image>>,
+        file: RefCell<Option<CopiedFile>>,
         concealed: Cell<bool>,
         changing_mid_read: Cell<bool>,
     }
@@ -119,6 +118,7 @@ mod tests {
             self.change_count.set(self.change_count.get() + 1);
             *self.text.borrow_mut() = Some(text.to_owned());
             *self.image.borrow_mut() = None;
+            *self.file.borrow_mut() = None;
             self.concealed.set(false);
         }
 
@@ -126,7 +126,13 @@ mod tests {
             self.change_count.set(self.change_count.get() + 1);
             *self.text.borrow_mut() = text.map(str::to_owned);
             *self.image.borrow_mut() = Some(image);
+            *self.file.borrow_mut() = None;
             self.concealed.set(false);
+        }
+
+        fn copy_file(&self, file: CopiedFile, name: &str) {
+            self.copy(name);
+            *self.file.borrow_mut() = Some(file);
         }
 
         fn copy_secret(&self, text: &str) {
@@ -138,6 +144,7 @@ mod tests {
             self.change_count.set(self.change_count.get() + 1);
             *self.text.borrow_mut() = None;
             *self.image.borrow_mut() = None;
+            *self.file.borrow_mut() = None;
             self.concealed.set(false);
         }
     }
@@ -155,6 +162,7 @@ mod tests {
                 change_count: self.change_count.get(),
                 text: self.text.borrow().clone(),
                 image: self.image.borrow().clone(),
+                file: self.file.borrow().clone(),
                 concealed: self.concealed.get(),
             })
         }
@@ -246,12 +254,19 @@ mod tests {
         assert!(history.clips().is_empty());
     }
 
-    fn image(png: Vec<u8>, source: ImageSource) -> Image {
+    fn image(png: Vec<u8>) -> Image {
         Image {
             png,
             width: 2,
             height: 1,
-            source,
+        }
+    }
+
+    fn file(name: &str, bytes: &[u8]) -> CopiedFile {
+        CopiedFile {
+            name: name.to_owned(),
+            bytes: bytes.to_vec(),
+            thumbnail: None,
         }
     }
 
@@ -261,24 +276,48 @@ mod tests {
         let pasteboard = FakePasteboard::default();
         let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), ImageSource::Data), None);
+        pasteboard.copy_image(image(b"png".to_vec()), None);
         let poll = collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert_eq!(poll.added, Some(Added::New));
         assert_eq!(contents(&history), ["Image 2×1"]);
     }
 
     #[test]
-    fn a_copied_image_file_beats_its_name() {
+    fn a_copied_file_beats_its_name() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
         let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(
-            image(b"png".to_vec(), ImageSource::File("shot.png".to_owned())),
-            Some("shot.png"),
-        );
+        pasteboard.copy_file(file("report.pdf", b"%PDF"), "report.pdf");
+        let poll = collector.poll(&pasteboard, &mut history, 100).unwrap();
+        assert_eq!(poll.added, Some(Added::New));
+        assert_eq!(contents(&history), ["report.pdf"]);
+        assert_eq!(history.clips()[0].kind, Kind::File);
+    }
+
+    #[test]
+    fn a_copied_image_file_keeps_its_original_bytes() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::starting_after_current(&pasteboard);
+
+        pasteboard.copy_file(file("anim.gif", b"GIF89a frames"), "anim.gif");
         collector.poll(&pasteboard, &mut history, 100).unwrap();
-        assert_eq!(contents(&history), ["shot.png · 2×1"]);
+        let clip = &history.clips()[0];
+        assert_eq!(clip.kind, Kind::File);
+        assert_eq!(history.data(&clip.hash).unwrap(), b"GIF89a frames");
+    }
+
+    #[test]
+    fn a_file_that_could_not_be_read_falls_back_to_its_name() {
+        let (_dir, mut history) = open_history();
+        let pasteboard = FakePasteboard::default();
+        let mut collector = Collector::starting_after_current(&pasteboard);
+
+        pasteboard.copy("huge.zip");
+        collector.poll(&pasteboard, &mut history, 100).unwrap();
+        assert_eq!(contents(&history), ["huge.zip"]);
+        assert_eq!(history.clips()[0].kind, Kind::Text);
     }
 
     #[test]
@@ -287,7 +326,7 @@ mod tests {
         let pasteboard = FakePasteboard::default();
         let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), ImageSource::Data), Some("caption"));
+        pasteboard.copy_image(image(b"png".to_vec()), Some("caption"));
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert_eq!(contents(&history), ["caption"]);
     }
@@ -299,27 +338,24 @@ mod tests {
         let mut collector = Collector::starting_after_current(&pasteboard);
         let huge = vec![0; MAX_IMAGE_BYTES + 1];
 
-        pasteboard.copy_image(image(huge.clone(), ImageSource::Data), None);
+        pasteboard.copy_image(image(huge), None);
         collector.poll(&pasteboard, &mut history, 100).unwrap();
         assert!(history.clips().is_empty());
-
-        pasteboard.copy_image(
-            image(huge, ImageSource::File("big.png".to_owned())),
-            Some("big.png"),
-        );
-        collector.poll(&pasteboard, &mut history, 200).unwrap();
-        assert_eq!(contents(&history), ["big.png"]);
     }
 
     #[test]
-    fn concealed_images_are_skipped() {
+    fn concealed_images_and_files_are_skipped() {
         let (_dir, mut history) = open_history();
         let pasteboard = FakePasteboard::default();
         let mut collector = Collector::starting_after_current(&pasteboard);
 
-        pasteboard.copy_image(image(b"png".to_vec(), ImageSource::Data), None);
+        pasteboard.copy_image(image(b"png".to_vec()), None);
         pasteboard.concealed.set(true);
         collector.poll(&pasteboard, &mut history, 100).unwrap();
+
+        pasteboard.copy_file(file("secret.key", b"key"), "secret.key");
+        pasteboard.concealed.set(true);
+        collector.poll(&pasteboard, &mut history, 200).unwrap();
         assert!(history.clips().is_empty());
     }
 
