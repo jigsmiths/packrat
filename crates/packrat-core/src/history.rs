@@ -5,7 +5,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use crate::db::{Clip, Db, Kind};
-use crate::pasteboard::{Image, ImageSource};
+use crate::pasteboard::{CopiedFile, Image};
 use crate::{Error, Result};
 
 pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -93,8 +93,34 @@ impl History {
         Ok(Added::New)
     }
 
-    pub fn image_data(&self, hash: &str) -> Result<Vec<u8>> {
+    pub fn add_file(&mut self, file: &CopiedFile, now_ms: i64) -> Result<Added> {
+        let hash = hash_file(file);
+        if self.position(&hash).is_some() {
+            self.bump(&hash, now_ms)?;
+            return Ok(Added::Bumped);
+        }
+        let clip = Clip {
+            hash,
+            content: file.name.clone(),
+            created_at_ms: now_ms,
+            last_used_at_ms: now_ms,
+            pinned: false,
+            kind: Kind::File,
+            size: file.bytes.len(),
+        };
+        self.db
+            .insert_file(&clip, &file.bytes, file.thumbnail.as_deref())?;
+        self.clips.push(clip);
+        self.sort();
+        Ok(Added::New)
+    }
+
+    pub fn data(&self, hash: &str) -> Result<Vec<u8>> {
         self.db.load_data(hash)
+    }
+
+    pub fn thumbnail(&self, hash: &str) -> Result<Vec<u8>> {
+        self.db.load_thumbnail(hash)
     }
 
     pub fn bump(&mut self, hash: &str, now_ms: i64) -> Result<()> {
@@ -161,20 +187,28 @@ pub fn hash_content(content: &str) -> String {
 }
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
+    hex(&Sha256::digest(bytes))
+}
+
+fn hex(digest: &[u8]) -> String {
     let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest.iter() {
+    for byte in digest {
         write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
     }
     hex
 }
 
+fn hash_file(file: &CopiedFile) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"file\0");
+    hasher.update(file.name.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(&file.bytes);
+    hex(&hasher.finalize())
+}
+
 fn image_label(image: &Image) -> String {
-    let size = format!("{}×{}", image.width, image.height);
-    match &image.source {
-        ImageSource::File(name) => format!("{name} · {size}"),
-        ImageSource::Data => format!("Image {size}"),
-    }
+    format!("Image {}×{}", image.width, image.height)
 }
 
 pub fn parse_ttl(value: &str) -> Result<Expiry> {
@@ -414,74 +448,124 @@ mod tests {
         assert_eq!(history.prune_expired(61_000).unwrap(), 1);
     }
 
-    fn image(png: &[u8], source: ImageSource) -> Image {
+    fn image(png: &[u8]) -> Image {
         Image {
             png: png.to_vec(),
             width: 1200,
             height: 800,
-            source,
+        }
+    }
+
+    fn file(name: &str, bytes: &[u8], thumbnail: Option<&[u8]>) -> CopiedFile {
+        CopiedFile {
+            name: name.to_owned(),
+            bytes: bytes.to_vec(),
+            thumbnail: thumbnail.map(<[u8]>::to_vec),
         }
     }
 
     #[test]
     fn add_image_stores_a_labelled_clip_and_its_bytes() {
         let (_dir, path, mut history) = open_temp();
-        let shot = image(
-            b"png bytes",
-            ImageSource::File("Screenshot 2026-11-17 at 10.02.png".to_owned()),
-        );
-        assert_eq!(history.add_image(&shot, 100).unwrap(), Added::New);
         assert_eq!(
-            history
-                .add_image(&image(b"other", ImageSource::Data), 200)
-                .unwrap(),
+            history.add_image(&image(b"png bytes"), 100).unwrap(),
             Added::New
         );
 
-        assert_eq!(
-            contents(&history),
-            [
-                "Image 1200×800",
-                "Screenshot 2026-11-17 at 10.02.png · 1200×800"
-            ]
-        );
-        let clip = &history.clips()[1];
+        assert_eq!(contents(&history), ["Image 1200×800"]);
+        let clip = &history.clips()[0];
         assert_eq!(clip.kind, Kind::Image);
         assert_eq!(clip.hash, hash_bytes(b"png bytes"));
-        assert_eq!(history.image_data(&clip.hash).unwrap(), b"png bytes");
+        assert_eq!(history.data(&clip.hash).unwrap(), b"png bytes");
 
         drop(history);
         let reopened = open(&path);
-        assert_eq!(reopened.clips()[1].kind, Kind::Image);
+        assert_eq!(reopened.clips()[0].kind, Kind::Image);
         assert_eq!(
-            reopened.image_data(&hash_bytes(b"other")).unwrap(),
-            b"other"
+            reopened.data(&hash_bytes(b"png bytes")).unwrap(),
+            b"png bytes"
         );
     }
 
     #[test]
     fn adding_a_known_image_bumps_it() {
         let (_dir, _path, mut history) = open_temp();
-        history
-            .add_image(&image(b"png", ImageSource::Data), 100)
-            .unwrap();
+        history.add_image(&image(b"png"), 100).unwrap();
         history.add("text", 200).unwrap();
         assert_eq!(
-            history
-                .add_image(&image(b"png", ImageSource::Data), 300)
-                .unwrap(),
+            history.add_image(&image(b"png"), 300).unwrap(),
             Added::Bumped
         );
         assert_eq!(contents(&history), ["Image 1200×800", "text"]);
     }
 
     #[test]
+    fn add_file_keeps_the_name_bytes_and_thumbnail() {
+        let (_dir, path, mut history) = open_temp();
+        let report = file("Q3 report.pdf", b"%PDF-1.7", Some(b"thumb"));
+        assert_eq!(history.add_file(&report, 100).unwrap(), Added::New);
+
+        let clip = history.clips()[0].clone();
+        assert_eq!(clip.content, "Q3 report.pdf");
+        assert_eq!(clip.kind, Kind::File);
+        assert_eq!(clip.size, 8);
+        assert_eq!(history.data(&clip.hash).unwrap(), b"%PDF-1.7");
+        assert_eq!(history.thumbnail(&clip.hash).unwrap(), b"thumb");
+
+        drop(history);
+        let reopened = open(&path);
+        assert_eq!(reopened.clips(), std::slice::from_ref(&clip));
+        assert_eq!(reopened.data(&clip.hash).unwrap(), b"%PDF-1.7");
+    }
+
+    #[test]
+    fn a_file_without_a_thumbnail_is_still_stored() {
+        let (_dir, _path, mut history) = open_temp();
+        history
+            .add_file(&file("blob.bin", b"raw", None), 100)
+            .unwrap();
+        let hash = history.clips()[0].hash.clone();
+        assert_eq!(history.data(&hash).unwrap(), b"raw");
+        assert!(matches!(history.thumbnail(&hash), Err(Error::NotFound)));
+    }
+
+    #[test]
+    fn copying_the_same_file_again_bumps_it() {
+        let (_dir, _path, mut history) = open_temp();
+        history
+            .add_file(&file("a.txt", b"same", None), 100)
+            .unwrap();
+        history.add("text", 200).unwrap();
+        assert_eq!(
+            history
+                .add_file(&file("a.txt", b"same", None), 300)
+                .unwrap(),
+            Added::Bumped
+        );
+        assert_eq!(contents(&history), ["a.txt", "text"]);
+    }
+
+    #[test]
+    fn a_file_is_distinct_from_its_renamed_copy_and_from_image_data() {
+        let (_dir, _path, mut history) = open_temp();
+        history.add_image(&image(b"same"), 100).unwrap();
+        history
+            .add_file(&file("a.png", b"same", None), 200)
+            .unwrap();
+        assert_eq!(
+            history
+                .add_file(&file("b.png", b"same", None), 300)
+                .unwrap(),
+            Added::New
+        );
+        assert_eq!(contents(&history), ["b.png", "a.png", "Image 1200×800"]);
+    }
+
+    #[test]
     fn sizes_count_text_and_image_bytes() {
         let (_dir, path, mut history) = open_temp();
         history.add("héllo", 100).unwrap();
-        history
-            .add_image(&image(b"png bytes", ImageSource::Data), 200)
-            .unwrap();
+        history.add_image(&image(b"png bytes"), 200).unwrap();
         let sizes: Vec<_> = history.clips().iter().map(|c| c.size).collect();
         assert_eq!(sizes, [9, 6]);
         assert_eq!(history.total_size(), 15);

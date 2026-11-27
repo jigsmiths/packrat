@@ -137,6 +137,11 @@ fn main() {
                 Err(problem) => log::error!("history not opened: {problem}"),
             }
             state.set_history(opened);
+            if let Err(problem) = commands::staging_dir(handle).and_then(|dir| {
+                packrat_core::pasteboard::clear_staged(&dir).map_err(|err| err.to_string())
+            }) {
+                log::warn!("could not clear the last pasted file: {problem}");
+            }
 
             if let Some(window) = handle.get_webview_window(popup::LABEL) {
                 popup::follow_active_space(&window)?;

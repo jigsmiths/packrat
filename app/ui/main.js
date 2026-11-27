@@ -152,6 +152,11 @@ function showImage(url) {
   preview.hidden = url !== null;
 }
 
+async function pngUrl(hash) {
+  const bytes = await invoke("image_clip", { hash });
+  return URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+}
+
 async function renderPreview() {
   const request = ++previewRequest;
   const row = selectedRow();
@@ -167,10 +172,16 @@ async function renderPreview() {
   try {
     const parts = [];
     let truncated = false;
-    if (row.image) {
-      const bytes = await invoke("image_clip", { hash: row.hash });
-      url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+    if (row.kind === "image") {
+      url = await pngUrl(row.hash);
       parts.push(`PNG, ${formatBytes(row.size)}`);
+    } else if (row.kind === "file") {
+      try {
+        url = await pngUrl(row.hash);
+      } catch (err) {
+        text = `${row.summary}\n\nNo preview for this file.`;
+      }
+      parts.push(`File, ${formatBytes(row.size)}`);
     } else {
       const shown = await invoke("preview_clip", { hash: row.hash });
       parts.push(`${shown.chars.toLocaleString()} characters`, formatBytes(row.size));
